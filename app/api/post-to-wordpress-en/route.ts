@@ -157,7 +157,12 @@ export async function POST(request: NextRequest) {
         link: postData.link,
       });
     } else {
-      const errorData = await response.json().catch(() => ({ error: await response.text() }));
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch {
+        errorData = { error: await response.text() };
+      }
       return NextResponse.json(
         {
           error: `WordPress API error: ${response.status}`,
