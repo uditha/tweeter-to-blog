@@ -93,7 +93,8 @@ export async function POST(
     }
 
     // Get tweet data
-    const tweet = tweets.getById(id);
+    const allTweets = tweets.getAll(10000, 0);
+    const tweet = allTweets.find((t: any) => t.id === id);
 
     if (!tweet) {
       return NextResponse.json(
