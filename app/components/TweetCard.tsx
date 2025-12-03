@@ -37,7 +37,7 @@ interface TweetCardProps {
   onSelect?: (id: number, selected: boolean) => void;
   onIgnore?: (id: number, ignored: boolean) => void;
   onGenerateArticle?: (id: number) => void;
-  onPublish?: (id: number, language: 'english' | 'french') => void;
+  onPublish?: (id: number, language: 'english' | 'french') => Promise<{ link: string } | void>;
 }
 
 export default function TweetCard({
