@@ -33,6 +33,8 @@ interface Tweet {
   published_french: number;
   published_english_at: string | null;
   published_french_at: string | null;
+  published_english_link: string | null;
+  published_french_link: string | null;
 }
 
 async function fetchArticles() {
