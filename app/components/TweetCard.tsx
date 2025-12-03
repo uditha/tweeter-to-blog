@@ -105,7 +105,7 @@ export default function TweetCard({
     setIsPublishing({ ...isPublishing, [language]: true });
     try {
       const response = await onPublish(tweet.id, language);
-      if (response && response.link) {
+      if (response && typeof response === 'object' && 'link' in response && response.link) {
         // Show success message with link
         if (window.confirm(`Article published successfully!\n\nView it at: ${response.link}\n\nClick OK to open in new tab.`)) {
           window.open(response.link, '_blank');
