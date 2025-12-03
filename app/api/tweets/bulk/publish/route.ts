@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
             id, 
             success: true, 
             error: 'Already published',
-            link: language === 'english' ? tweet.published_english_link : tweet.published_french_link || undefined
+            link: (language === 'english' ? tweet.published_english_link : tweet.published_french_link) || undefined
           });
           continue;
         }
