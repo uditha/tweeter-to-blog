@@ -14,6 +14,7 @@ async function uploadImageToWordPress(
     });
     
     if (!imgResponse.ok) {
+      console.error(`Failed to download image: ${imageUrl} - Status: ${imgResponse.status}`);
       return null;
     }
 
@@ -144,11 +145,16 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        let articleData: { title: string; article: string };
+        let articleData: { title: string; article?: string; content?: string };
         try {
           articleData = JSON.parse(articleContent);
         } catch {
           results.push({ id, success: false, error: 'Invalid article format' });
+          continue;
+        }
+
+        if (!articleData.title || (!articleData.article && !articleData.content)) {
+          results.push({ id, success: false, error: 'Invalid article format: missing title or content' });
           continue;
         }
 
@@ -176,7 +182,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Create post
-        const fullContent = `${articleData.article || articleData.content}
+        const fullContent = `${articleData.article || articleData.content || ''}
 <hr>
 <p><em>Source: <a href="https://twitter.com/${tweet.username}/status/${tweet.tweet_id}" target="_blank">Original Tweet</a></em></p>`;
 
