@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { settings } from '@/lib/db';
 
-export async function uploadImageToWordPress(
+async function uploadImageToWordPress(
   imageUrl: string,
   wpUrl: string,
   wpUsername: string,
