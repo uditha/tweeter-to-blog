@@ -124,6 +124,11 @@ function parseTweetFromEntry(entry: any): ParsedTweet | null {
 
   const parsed = parseTweetData(tweetResult);
   
+  // If parsing failed, return null
+  if (!parsed) {
+    return null;
+  }
+  
   if (retweetedTweet) {
     parsed.isRetweet = true;
     parsed.retweetedTweet = retweetedTweet;
@@ -143,9 +148,14 @@ function parseTweetFromEntry(entry: any): ParsedTweet | null {
 /**
  * Parse tweet data from a tweet result object
  */
-function parseTweetData(tweet: any): ParsedTweet {
+function parseTweetData(tweet: any): ParsedTweet | null {
   const legacy = tweet?.legacy || tweet;
-  const restId = tweet?.rest_id || tweet?.id_str || tweet?.id || 'unknown';
+  const restId = tweet?.rest_id || tweet?.id_str || tweet?.id;
+  
+  // Return null if we can't find a valid tweet ID
+  if (!restId || restId === 'unknown') {
+    return null;
+  }
   
   // Get user information - check multiple paths
   let user = null;

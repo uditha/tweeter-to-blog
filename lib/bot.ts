@@ -122,6 +122,11 @@ async function processAccount(account: { id: number; username: string; user_id: 
     
     // Only add tweets that are newer than what we have
     for (const tweet of fetchedTweets) {
+      // Skip invalid tweets (missing ID, text, or other required fields)
+      if (!tweet.id || tweet.id === 'unknown' || !tweet.text || !tweet.userId || !tweet.userScreenName) {
+        continue; // Skip this invalid tweet
+      }
+      
       // Skip if we already have this tweet
       if (newestTweetId && tweet.id === newestTweetId) {
         break; // We've reached tweets we already have
