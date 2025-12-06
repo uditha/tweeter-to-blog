@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { tweets, accounts } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const allTweets = tweets.getAll(10000, 0); // Get all tweets for stats

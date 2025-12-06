@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { accounts } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const allAccounts = accounts.getAll();

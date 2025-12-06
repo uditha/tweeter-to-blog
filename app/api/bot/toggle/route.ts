@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { setBotStatus, getBotStatus } from '@/lib/botStatus';
 import { startBot, stopBot, restoreBotState } from '@/lib/bot';
 
+export const dynamic = 'force-dynamic';
+
 // Restore bot state on first API call (ensures bot continues after server restart)
 let botRestored = false;
 if (!botRestored) {

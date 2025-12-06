@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { settings, tweets } from '@/lib/db';
 import { Buffer } from 'buffer';
 
+export const dynamic = 'force-dynamic';
+
 async function uploadImageToWordPress(
   imageUrl: string,
   wpUrl: string,

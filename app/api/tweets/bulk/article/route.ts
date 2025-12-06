@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { tweets } from '@/lib/db';
 import { generateArticle } from '@/app/actions/generateArticle';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     const { tweetIds, language } = await request.json();
