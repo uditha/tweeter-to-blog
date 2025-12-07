@@ -4,7 +4,13 @@ import { tweets, accounts } from '@/lib/db';
 export async function GET() {
   try {
     // Get all tweets for calculations
-    const allTweets = await tweets.getAll(10000, 0);
+    let allTweets: any[] = [];
+    try {
+      allTweets = await tweets.getAll(10000, 0);
+    } catch (error) {
+      console.error('Error fetching tweets for stats:', error);
+      allTweets = [];
+    }
     
     // Calculate statistics
     const totalTweets = allTweets.length;
@@ -15,8 +21,14 @@ export async function GET() {
     const activeTweets = allTweets.filter((t: any) => t.ignored === 0 && t.article_generated === 0).length;
     
     // Get account count
-    const allAccounts = await accounts.getAll();
-    const totalAccounts = allAccounts.length;
+    let totalAccounts = 0;
+    try {
+      const allAccounts = await accounts.getAll();
+      totalAccounts = allAccounts.length;
+    } catch (error) {
+      console.error('Error fetching accounts for stats:', error);
+      totalAccounts = 0;
+    }
     
     // Calculate engagement metrics
     const totalLikes = allTweets.reduce((sum: number, t: any) => sum + (t.like_count || 0), 0);

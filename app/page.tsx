@@ -44,8 +44,15 @@ interface Stats {
 
 async function fetchStats(): Promise<Stats> {
   const response = await fetch('/api/stats');
-  if (!response.ok) throw new Error('Failed to fetch stats');
-  return response.json();
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || `Failed to fetch stats: ${response.status}`);
+  }
+  const data = await response.json();
+  if (data.error) {
+    throw new Error(data.message || data.error);
+  }
+  return data;
 }
 
 function formatNumber(num: number): string {
@@ -57,10 +64,11 @@ function formatNumber(num: number): string {
 export default function Dashboard() {
   const { isRunning, isLoading, toggleBot } = useBotStatus();
   
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const { data: stats, isLoading: statsLoading, error: statsError } = useQuery({
     queryKey: ['stats'],
     queryFn: fetchStats,
     refetchInterval: 30000, // Refetch every 30 seconds
+    retry: 2,
   });
 
   return (
@@ -81,6 +89,19 @@ export default function Dashboard() {
           {[...Array(4)].map((_, i) => (
             <SkeletonStatCard key={i} />
           ))}
+        </div>
+      ) : statsError ? (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-red-900 mb-2">Error Loading Stats</h3>
+          <p className="text-sm text-red-700 mb-4">
+            {statsError instanceof Error ? statsError.message : 'Failed to load statistics. Please try refreshing the page.'}
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+          >
+            Refresh Page
+          </button>
         </div>
       ) : stats ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

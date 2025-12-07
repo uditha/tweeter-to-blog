@@ -193,7 +193,7 @@ export const tweets = {
     const result = await pool.query(`
       SELECT t.*, a.name as account_name, a.username as account_username
       FROM tweets t
-      JOIN accounts a ON t.account_id = a.id
+      LEFT JOIN accounts a ON t.account_id = a.id
       ORDER BY t.fetched_at DESC, t.id DESC
       LIMIT $1 OFFSET $2
     `, [limit, offset]);
