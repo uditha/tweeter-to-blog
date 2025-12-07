@@ -1,6 +1,10 @@
 import { NextRequest } from 'next/server';
 import { tweets } from '@/lib/db';
 
+// Force dynamic rendering - this is a streaming endpoint
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export async function GET(request: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({

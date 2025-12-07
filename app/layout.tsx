@@ -3,6 +3,9 @@ import './globals.css'
 import { Providers } from './providers'
 import DashboardLayout from './components/DashboardLayout'
 
+// Force dynamic rendering - app requires database access
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'Tweet Publisher - Twitter/X Article Generator',
   description: 'Monitor Twitter/X accounts, generate articles, and publish to WordPress',
