@@ -1,48 +1,59 @@
 import { NextResponse } from 'next/server';
-import { tweets, accounts } from '@/lib/db';
+import { pool } from '@/lib/db';
 
 export async function GET() {
+  let client;
   try {
-    // Get all tweets for calculations
-    let allTweets: any[] = [];
-    try {
-      allTweets = await tweets.getAll(10000, 0);
-    } catch (error) {
-      console.error('Error fetching tweets for stats:', error);
-      allTweets = [];
-    }
+    // Get a client from the pool with timeout handling
+    client = await pool.connect();
     
-    // Calculate statistics
-    const totalTweets = allTweets.length;
-    const tweetsWithArticles = allTweets.filter((t: any) => t.article_generated === 1).length;
-    const ignoredTweets = allTweets.filter((t: any) => t.ignored === 1).length;
-    const publishedEnglish = allTweets.filter((t: any) => t.published_english === 1).length;
-    const publishedFrench = allTweets.filter((t: any) => t.published_french === 1).length;
-    const activeTweets = allTweets.filter((t: any) => t.ignored === 0 && t.article_generated === 0).length;
-    
+    // Use SQL aggregations for accurate counts - much more efficient and accurate
+    const statsQuery = `
+      SELECT 
+        COUNT(*) as total_tweets,
+        COUNT(CASE WHEN ignored = 1 THEN 1 END) as ignored_tweets,
+        COUNT(CASE WHEN article_generated = 1 THEN 1 END) as tweets_with_articles,
+        COUNT(CASE WHEN ignored = 0 AND article_generated = 0 THEN 1 END) as active_tweets,
+        COUNT(CASE WHEN published_english = 1 THEN 1 END) as published_english,
+        COUNT(CASE WHEN published_french = 1 THEN 1 END) as published_french,
+        COALESCE(SUM(like_count), 0) as total_likes,
+        COALESCE(SUM(retweet_count), 0) as total_retweets,
+        COALESCE(SUM(reply_count), 0) as total_replies,
+        COALESCE(SUM(view_count), 0) as total_views,
+        COALESCE(SUM(quote_count), 0) as total_quotes,
+        COUNT(CASE WHEN like_count > 0 THEN 1 END) as tweets_with_likes,
+        COUNT(CASE WHEN view_count > 0 THEN 1 END) as tweets_with_views
+      FROM tweets
+    `;
+
+    const statsResult = await client.query(statsQuery);
+    const stats = statsResult.rows[0];
+
     // Get account count
-    let totalAccounts = 0;
-    try {
-      const allAccounts = await accounts.getAll();
-      totalAccounts = allAccounts.length;
-    } catch (error) {
-      console.error('Error fetching accounts for stats:', error);
-      totalAccounts = 0;
-    }
+    const accountsQuery = 'SELECT COUNT(*) as total FROM accounts';
+    const accountsResult = await client.query(accountsQuery);
+    const totalAccounts = parseInt(accountsResult.rows[0].total, 10) || 0;
+
+    // Parse stats (PostgreSQL returns strings for bigint)
+    const totalTweets = parseInt(stats.total_tweets, 10) || 0;
+    const ignoredTweets = parseInt(stats.ignored_tweets, 10) || 0;
+    const tweetsWithArticles = parseInt(stats.tweets_with_articles, 10) || 0;
+    const activeTweets = parseInt(stats.active_tweets, 10) || 0;
+    const publishedEnglish = parseInt(stats.published_english, 10) || 0;
+    const publishedFrench = parseInt(stats.published_french, 10) || 0;
     
-    // Calculate engagement metrics
-    const totalLikes = allTweets.reduce((sum: number, t: any) => sum + (t.like_count || 0), 0);
-    const totalRetweets = allTweets.reduce((sum: number, t: any) => sum + (t.retweet_count || 0), 0);
-    const totalReplies = allTweets.reduce((sum: number, t: any) => sum + (t.reply_count || 0), 0);
-    const totalViews = allTweets.reduce((sum: number, t: any) => sum + (t.view_count || 0), 0);
-    const totalQuotes = allTweets.reduce((sum: number, t: any) => sum + (t.quote_count || 0), 0);
+    const totalLikes = parseInt(stats.total_likes, 10) || 0;
+    const totalRetweets = parseInt(stats.total_retweets, 10) || 0;
+    const totalReplies = parseInt(stats.total_replies, 10) || 0;
+    const totalViews = parseInt(stats.total_views, 10) || 0;
+    const totalQuotes = parseInt(stats.total_quotes, 10) || 0;
     
-    // Calculate averages (only for non-zero tweets)
-    const tweetsWithLikes = allTweets.filter((t: any) => (t.like_count || 0) > 0);
-    const tweetsWithViews = allTweets.filter((t: any) => (t.view_count || 0) > 0);
+    const tweetsWithLikes = parseInt(stats.tweets_with_likes, 10) || 0;
+    const tweetsWithViews = parseInt(stats.tweets_with_views, 10) || 0;
     
-    const avgLikes = tweetsWithLikes.length > 0 
-      ? Math.round(totalLikes / tweetsWithLikes.length) 
+    // Calculate averages
+    const avgLikes = tweetsWithLikes > 0 
+      ? Math.round(totalLikes / tweetsWithLikes) 
       : 0;
     const avgRetweets = totalTweets > 0 
       ? (totalRetweets / totalTweets).toFixed(1) 
@@ -50,8 +61,8 @@ export async function GET() {
     const avgReplies = totalTweets > 0 
       ? (totalReplies / totalTweets).toFixed(1) 
       : '0.0';
-    const avgViews = tweetsWithViews.length > 0 
-      ? Math.round(totalViews / tweetsWithViews.length) 
+    const avgViews = tweetsWithViews > 0 
+      ? Math.round(totalViews / tweetsWithViews) 
       : 0;
     
     // Calculate engagement rate (likes + retweets + replies) / views
@@ -105,5 +116,10 @@ export async function GET() {
       { error: 'Failed to fetch stats', message: error.message },
       { status: 500 }
     );
+  } finally {
+    // Always release the client back to the pool
+    if (client) {
+      client.release();
+    }
   }
 }

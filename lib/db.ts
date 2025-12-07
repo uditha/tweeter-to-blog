@@ -1,17 +1,62 @@
 import { Pool, QueryResult } from 'pg';
 
 // Initialize PostgreSQL connection pool
+// Optimized for serverless environments (Vercel, etc.)
 const connectionString = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_APbdO1pNkz4Z@ep-proud-glade-adurvu64-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
-const pool = new Pool({
+// Check if we're in a serverless environment
+const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NEXT_RUNTIME === 'nodejs');
+
+const poolConfig: any = {
   connectionString,
   ssl: {
     rejectUnauthorized: false,
   },
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-});
+  // Optimize for serverless: fewer connections, shorter timeouts
+  max: isServerless ? 1 : 20, // Serverless functions should use 1 connection
+  min: 0, // Allow pool to shrink to 0
+  idleTimeoutMillis: isServerless ? 10000 : 30000, // Shorter timeout for serverless
+  connectionTimeoutMillis: isServerless ? 10000 : 2000, // Longer timeout for initial connection
+};
+
+// Add serverless-specific option if supported
+if (isServerless) {
+  poolConfig.allowExitOnIdle = true;
+}
+
+const pool = new Pool(poolConfig);
+
+// Helper function to execute queries with retry logic for connection timeouts
+async function queryWithRetry(
+  queryFn: () => Promise<QueryResult<any>>,
+  retries: number = 3
+): Promise<QueryResult<any>> {
+  let lastError: Error | null = null;
+  
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await queryFn();
+    } catch (error: any) {
+      lastError = error;
+      const isConnectionError = 
+        error.message?.includes('timeout') ||
+        error.message?.includes('terminated') ||
+        error.message?.includes('Connection') ||
+        error.code === 'ECONNRESET' ||
+        error.code === 'ETIMEDOUT';
+      
+      if (!isConnectionError || i === retries - 1) {
+        throw error;
+      }
+      
+      // Exponential backoff: wait 1s, 2s, 4s
+      const delay = Math.min(1000 * Math.pow(2, i), 5000);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError || new Error('Query failed after retries');
+}
 
 // Test connection
 pool.on('connect', () => {
@@ -20,6 +65,17 @@ pool.on('connect', () => {
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
+  // Don't exit process in serverless - let it handle reconnection
+  if (!isServerless) {
+    process.exit(-1);
+  }
+});
+
+// Handle connection errors gracefully
+pool.on('connect', (client) => {
+  client.on('error', (err) => {
+    console.error('Database client error:', err);
+  });
 });
 
 // Initialize tables
@@ -324,7 +380,7 @@ export const tweets = {
     let query = `
       SELECT t.*, a.name as account_name, a.username as account_username
       FROM tweets t
-      JOIN accounts a ON t.account_id = a.id
+      LEFT JOIN accounts a ON t.account_id = a.id
       WHERE 1=1
     `;
     const params: any[] = [];
@@ -359,7 +415,8 @@ export const tweets = {
     query += ` ORDER BY t.fetched_at DESC, t.id DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     params.push(limit, offset);
 
-    const result = await pool.query(query, params);
+    // Use retry helper for connection timeouts
+    const result = await queryWithRetry(() => pool.query(query, params));
     return result.rows as any[];
   },
 };
@@ -416,4 +473,5 @@ async function initializeDefaultSettings() {
 // Initialize default settings
 initializeDefaultSettings().catch(console.error);
 
+export { pool };
 export default pool;
