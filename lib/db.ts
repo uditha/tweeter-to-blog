@@ -89,8 +89,28 @@ async function initializeTables() {
   }
 }
 
-// Initialize tables on module load
-initializeTables().catch(console.error);
+// Initialize tables on module load (with error handling for serverless)
+let initializationPromise: Promise<void> | null = null;
+
+function ensureInitialized(): Promise<void> {
+  if (!initializationPromise) {
+    initializationPromise = initializeTables().catch((error) => {
+      console.error('Database initialization error:', error);
+      // Don't throw - allow retry on first use
+      initializationPromise = null;
+      throw error;
+    });
+  }
+  return initializationPromise;
+}
+
+// Try to initialize, but don't block module load
+if (typeof window === 'undefined') {
+  // Only run on server
+  ensureInitialized().catch(() => {
+    // Silently fail - will retry on first database operation
+  });
+}
 
 export interface Account {
   id: number;

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { Providers } from './providers'
 import DashboardLayout from './components/DashboardLayout'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 // Force dynamic rendering - app requires database access
 export const dynamic = 'force-dynamic';
@@ -19,9 +20,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <Providers>
-          <DashboardLayout>{children}</DashboardLayout>
-        </Providers>
+        <ErrorBoundary>
+          <Providers>
+            <DashboardLayout>{children}</DashboardLayout>
+          </Providers>
+        </ErrorBoundary>
       </body>
     </html>
   )

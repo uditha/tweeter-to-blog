@@ -4,7 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import ArticleViewer from '@/app/components/ArticleViewer';
 import TweetCard from '@/app/components/TweetCard';
 import { FileText, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { SkeletonTweetCard } from '@/app/components/SkeletonLoader';
+import EmptyState from '@/app/components/EmptyState';
+import SearchBar from '@/app/components/SearchBar';
 
 interface Tweet {
   id: number;
@@ -45,6 +48,7 @@ async function fetchArticles() {
 
 export default function ArticlesPage() {
   const [selectedTweet, setSelectedTweet] = useState<Tweet | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const { data: tweets, isLoading, refetch } = useQuery({
     queryKey: ['articles'],
@@ -52,31 +56,70 @@ export default function ArticlesPage() {
     refetchInterval: 10000, // Refetch every 10 seconds
   });
 
-  const articles = tweets?.filter((tweet: Tweet) => tweet.article_generated === 1) || [];
+  const articles = useMemo(() => {
+    const allArticles = tweets?.filter((tweet: Tweet) => tweet.article_generated === 1) || [];
+    
+    if (!searchQuery.trim()) return allArticles;
+    
+    const query = searchQuery.toLowerCase();
+    return allArticles.filter((tweet: Tweet) => {
+      const text = tweet.text.toLowerCase();
+      const username = (tweet.account_username || tweet.username || '').toLowerCase();
+      const accountName = (tweet.account_name || '').toLowerCase();
+      return text.includes(query) || username.includes(query) || accountName.includes(query);
+    });
+  }, [tweets, searchQuery]);
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Articles</h1>
           <p className="mt-2 text-sm text-gray-600">
             View generated articles from tweets
           </p>
         </div>
-        <button
-          onClick={() => refetch()}
-          className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center space-x-2"
-        >
-          <RefreshCw className="h-4 w-4" />
-          <span>Refresh</span>
-        </button>
+        <div className="flex gap-2">
+          <SearchBar
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search articles..."
+            className="flex-1 sm:flex-initial sm:w-64"
+          />
+          <button
+            onClick={() => refetch()}
+            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center space-x-2"
+          >
+            <RefreshCw className="h-4 w-4" />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
-        <div className="text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <p className="mt-4 text-gray-600">Loading articles...</p>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+              <div className="h-6 bg-gray-200 rounded w-32 mb-4 animate-pulse" />
+              <div className="space-y-2">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="h-20 bg-gray-200 rounded animate-pulse" />
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="lg:col-span-2 space-y-6">
+            <SkeletonTweetCard />
+            <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
+              <div className="h-6 bg-gray-200 rounded w-32 animate-pulse" />
+              <div className="space-y-2">
+                <div className="h-4 bg-gray-200 rounded w-full animate-pulse" />
+                <div className="h-4 bg-gray-200 rounded w-5/6 animate-pulse" />
+                <div className="h-4 bg-gray-200 rounded w-4/6 animate-pulse" />
+              </div>
+            </div>
+          </div>
         </div>
       ) : articles.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -148,18 +191,24 @@ export default function ArticlesPage() {
                 />
               </>
             ) : (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
-                <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500">Select an article from the list to view it</p>
-              </div>
+              <EmptyState
+                icon={FileText}
+                title="No article selected"
+                description="Select an article from the list to view it"
+              />
             )}
           </div>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
-          <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-gray-500">No articles generated yet. Generate articles from tweets first.</p>
-        </div>
+        <EmptyState
+          icon={FileText}
+          title="No articles yet"
+          description="No articles generated yet. Generate articles from tweets first."
+          action={{
+            label: 'Go to Tweets',
+            onClick: () => window.location.href = '/tweets',
+          }}
+        />
       )}
     </div>
   );

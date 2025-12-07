@@ -4,6 +4,12 @@ import { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import TweetCard from '@/app/components/TweetCard';
 import { Filter, RefreshCw, User, FileText, MessageSquare, EyeOff, Sparkles, Loader2, CheckSquare, Square } from 'lucide-react';
+import { useToast } from '@/app/components/ToastProvider';
+import { SkeletonTweetCard } from '@/app/components/SkeletonLoader';
+import EmptyState from '@/app/components/EmptyState';
+import SearchBar from '@/app/components/SearchBar';
+import FilterPanel, { FilterState } from '@/app/components/FilterPanel';
+import ProgressModal from '@/app/components/ProgressModal';
 
 interface Tweet {
   id: number;
@@ -96,10 +102,21 @@ async function fetchAccounts(): Promise<Account[]> {
 
 export default function TweetsPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<TabType>('all');
   const [selectedTweets, setSelectedTweets] = useState<Set<number>>(new Set());
   const [accountFilter, setAccountFilter] = useState<number | undefined>(undefined);
   const [isBulkGenerating, setIsBulkGenerating] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterState, setFilterState] = useState<FilterState>({
+    dateRange: 'all',
+    sortBy: 'date',
+    sortOrder: 'desc',
+  });
+  const [progressModal, setProgressModal] = useState<{
+    isOpen: boolean;
+    items: Array<{ id: number; status: 'pending' | 'processing' | 'success' | 'error'; error?: string }>;
+  } | null>(null);
 
   const { data: accounts, isLoading: accountsLoading } = useQuery({
     queryKey: ['accounts'],
@@ -145,6 +162,97 @@ export default function TweetsPage() {
     staleTime: 0, // Always consider stale for real-time updates
   });
 
+  // Filter and sort tweets client-side
+  const filteredAndSortedTweets = useMemo(() => {
+    if (!tweets) return [];
+
+    let filtered = [...tweets];
+
+    // Search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((tweet: Tweet) => {
+        const text = tweet.text.toLowerCase();
+        const username = (tweet.account_username || tweet.username || '').toLowerCase();
+        const accountName = (tweet.account_name || '').toLowerCase();
+        const hashtags = tweet.hashtags ? JSON.parse(tweet.hashtags).join(' ').toLowerCase() : '';
+        return text.includes(query) || username.includes(query) || accountName.includes(query) || hashtags.includes(query);
+      });
+    }
+
+    // Date range filter
+    if (filterState.dateRange !== 'all') {
+      const now = new Date();
+      let cutoffDate: Date;
+      
+      if (filterState.dateRange === '7d') {
+        cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      } else if (filterState.dateRange === '30d') {
+        cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      } else if (filterState.dateRange === 'custom') {
+        if (filterState.customStartDate && filterState.customEndDate) {
+          const startDate = new Date(filterState.customStartDate);
+          const endDate = new Date(filterState.customEndDate);
+          endDate.setHours(23, 59, 59, 999);
+          filtered = filtered.filter((tweet: Tweet) => {
+            const tweetDate = new Date(tweet.created_at);
+            return tweetDate >= startDate && tweetDate <= endDate;
+          });
+        }
+      } else {
+        cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
+
+      if (filterState.dateRange !== 'custom') {
+        filtered = filtered.filter((tweet: Tweet) => {
+          const tweetDate = new Date(tweet.created_at);
+          return tweetDate >= cutoffDate;
+        });
+      }
+    }
+
+    // Engagement filters
+    if (filterState.minLikes !== undefined && filterState.minLikes > 0) {
+      filtered = filtered.filter((tweet: Tweet) => tweet.like_count >= filterState.minLikes!);
+    }
+    if (filterState.minRetweets !== undefined && filterState.minRetweets > 0) {
+      filtered = filtered.filter((tweet: Tweet) => tweet.retweet_count >= filterState.minRetweets!);
+    }
+    if (filterState.minViews !== undefined && filterState.minViews > 0) {
+      filtered = filtered.filter((tweet: Tweet) => (tweet.view_count || 0) >= filterState.minViews!);
+    }
+
+    // Sort
+    filtered.sort((a: Tweet, b: Tweet) => {
+      let comparison = 0;
+      
+      switch (filterState.sortBy) {
+        case 'likes':
+          comparison = a.like_count - b.like_count;
+          break;
+        case 'retweets':
+          comparison = a.retweet_count - b.retweet_count;
+          break;
+        case 'views':
+          comparison = (a.view_count || 0) - (b.view_count || 0);
+          break;
+        case 'account':
+          const aName = (a.account_name || a.username || '').toLowerCase();
+          const bName = (b.account_name || b.username || '').toLowerCase();
+          comparison = aName.localeCompare(bName);
+          break;
+        case 'date':
+        default:
+          comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          break;
+      }
+
+      return filterState.sortOrder === 'desc' ? -comparison : comparison;
+    });
+
+    return filtered;
+  }, [tweets, searchQuery, filterState]);
+
   const handleSelect = (id: number, selected: boolean) => {
     setSelectedTweets((prev) => {
       const newSelected = new Set(prev);
@@ -170,8 +278,9 @@ export default function TweetsPage() {
       }
 
       await queryClient.invalidateQueries({ queryKey: ['tweets'] });
+      toast.showSuccess('Tweet updated successfully');
     } catch (error: any) {
-      alert(`Error: ${error.message}`);
+      toast.showError(error.message || 'Failed to update tweet');
     }
   };
 
@@ -189,9 +298,9 @@ export default function TweetsPage() {
       }
 
       await queryClient.invalidateQueries({ queryKey: ['tweets'] });
-      alert('Article generation started! This may take a few moments.');
+      toast.showInfo('Article generation started! This may take a few moments.');
     } catch (error: any) {
-      alert(`Error: ${error.message}`);
+      toast.showError(error.message || 'Failed to generate article');
     }
   };
 
@@ -210,53 +319,112 @@ export default function TweetsPage() {
 
       const data = await response.json();
       await queryClient.invalidateQueries({ queryKey: ['tweets'] });
+      toast.showSuccess('Article published successfully!');
       return { link: data.link };
     } catch (error: any) {
-      alert(`Error: ${error.message}`);
+      toast.showError(error.message || 'Failed to publish article');
       throw error;
     }
   };
 
   const handleBulkGenerateArticles = async () => {
     if (selectedTweets.size === 0) {
-      alert('Please select at least one tweet to generate articles for.');
+      toast.showWarning('Please select at least one tweet to generate articles for.');
       return;
     }
 
-    if (!confirm(`Generate articles for ${selectedTweets.size} selected tweet(s)? This may take several minutes.`)) {
+    // Use a custom confirm dialog via toast
+    const confirmed = window.confirm(`Generate articles for ${selectedTweets.size} selected tweet(s)? This may take several minutes.`);
+    if (!confirmed) {
       return;
     }
+
+    const tweetIds = Array.from(selectedTweets);
+    
+    // Initialize progress modal
+    setProgressModal({
+      isOpen: true,
+      items: tweetIds.map((id) => ({ id, status: 'pending' as const })),
+    });
 
     setIsBulkGenerating(true);
-    try {
-      const response = await fetch('/api/tweets/bulk/article', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tweetIds: Array.from(selectedTweets),
-          language: 'both',
-        }),
+
+    // Process tweets one by one to show progress
+    const results = {
+      successful: 0,
+      failed: 0,
+      total: tweetIds.length,
+    };
+
+    for (let i = 0; i < tweetIds.length; i++) {
+      const tweetId = tweetIds[i];
+      
+      // Update status to processing
+      setProgressModal((prev) => {
+        if (!prev) return prev;
+        const newItems = [...prev.items];
+        const itemIndex = newItems.findIndex((item) => item.id === tweetId);
+        if (itemIndex !== -1) {
+          newItems[itemIndex] = { ...newItems[itemIndex], status: 'processing' };
+        }
+        return { ...prev, items: newItems };
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to generate articles');
+      try {
+        const response = await fetch(`/api/tweets/${tweetId}/article`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ language: 'both' }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to generate article');
+        }
+
+        results.successful++;
+        
+        // Update status to success
+        setProgressModal((prev) => {
+          if (!prev) return prev;
+          const newItems = [...prev.items];
+          const itemIndex = newItems.findIndex((item) => item.id === tweetId);
+          if (itemIndex !== -1) {
+            newItems[itemIndex] = { ...newItems[itemIndex], status: 'success' };
+          }
+          return { ...prev, items: newItems };
+        });
+      } catch (error: any) {
+        results.failed++;
+        
+        // Update status to error
+        setProgressModal((prev) => {
+          if (!prev) return prev;
+          const newItems = [...prev.items];
+          const itemIndex = newItems.findIndex((item) => item.id === tweetId);
+          if (itemIndex !== -1) {
+            newItems[itemIndex] = {
+              ...newItems[itemIndex],
+              status: 'error',
+              error: error.message || 'Failed to generate article',
+            };
+          }
+          return { ...prev, items: newItems };
+        });
       }
+    }
 
-      const data = await response.json();
-      await queryClient.invalidateQueries({ queryKey: ['tweets'] });
-      setSelectedTweets(new Set()); // Clear selection
+    await queryClient.invalidateQueries({ queryKey: ['tweets'] });
+    setSelectedTweets(new Set()); // Clear selection
+    setIsBulkGenerating(false);
 
-      alert(
-        `Bulk article generation completed!\n\n` +
-        `✅ Successful: ${data.results.successful}\n` +
-        `❌ Failed: ${data.results.failed}\n` +
-        `📊 Total: ${data.results.total}`
+    if (results.failed === 0) {
+      toast.showSuccess(`Successfully generated articles for ${results.successful} tweet(s)!`);
+    } else {
+      toast.showWarning(
+        `Bulk generation completed: ${results.successful} successful, ${results.failed} failed.`,
+        8000
       );
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
-    } finally {
-      setIsBulkGenerating(false);
     }
   };
 
@@ -270,7 +438,7 @@ export default function TweetsPage() {
     setSelectedTweets(new Set());
   };
 
-  const selectableTweets = tweets?.filter((tweet: Tweet) => 
+  const selectableTweets = filteredAndSortedTweets?.filter((tweet: Tweet) => 
     tweet.article_generated === 0 && tweet.ignored === 0
   ) || [];
   
@@ -330,12 +498,13 @@ export default function TweetsPage() {
             {TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
-              const tabTweets = tweets?.filter((tweet: Tweet) => {
-                if (tab.id === 'with-articles') return tweet.article_generated === 1;
-                if (tab.id === 'ignored') return tweet.ignored === 1;
-                return true;
-              });
-              const count = tabTweets?.length || 0;
+              // Count should reflect filtered results
+              const count = tab.id === activeTab ? filteredAndSortedTweets.length : 
+                tweets?.filter((tweet: Tweet) => {
+                  if (tab.id === 'with-articles') return tweet.article_generated === 1;
+                  if (tab.id === 'ignored') return tweet.ignored === 1;
+                  return true;
+                }).length || 0;
 
               return (
                 <button
@@ -375,25 +544,34 @@ export default function TweetsPage() {
         {/* Filters and Bulk Actions */}
         <div className="p-4 border-b border-gray-200 bg-gray-50">
           <div className="flex flex-col gap-4">
-            {/* Account Filter */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-              <div className="flex items-center space-x-2">
-                <Filter className="h-4 w-4 text-gray-500" />
-                <span className="text-sm font-medium text-gray-700">Filter by Account:</span>
+            {/* Search and Filters Row */}
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1">
+                <SearchBar
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  placeholder="Search tweets, usernames, hashtags..."
+                />
               </div>
-              <select
-                value={accountFilter || ''}
-                onChange={(e) => setAccountFilter(e.target.value ? parseInt(e.target.value) : undefined)}
-                className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
-                aria-label="Filter by account"
-              >
-                <option value="">All Accounts</option>
-                {accounts?.map((account: Account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name} (@{account.username})
-                  </option>
-                ))}
-              </select>
+              <div className="flex gap-2">
+                <FilterPanel
+                  onFilterChange={setFilterState}
+                  accounts={accounts}
+                />
+                <select
+                  value={accountFilter || ''}
+                  onChange={(e) => setAccountFilter(e.target.value ? parseInt(e.target.value) : undefined)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+                  aria-label="Filter by account"
+                >
+                  <option value="">All Accounts</option>
+                  {accounts?.map((account: Account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name} (@{account.username})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {/* Bulk Selection Actions - Only show in "All Tweets" tab */}
@@ -403,7 +581,8 @@ export default function TweetsPage() {
                   <span>
                     {selectedTweets.size > 0 
                       ? `${selectedTweets.size} of ${selectableTweets.length} selected`
-                      : `${selectableTweets.length} tweets available for article generation`}
+                      : `${selectableTweets.length} tweet${selectableTweets.length !== 1 ? 's' : ''} available for article generation`}
+                    {searchQuery && ` (filtered from ${tweets?.length || 0} total)`}
                   </span>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -432,15 +611,14 @@ export default function TweetsPage() {
 
       {/* Tweets List */}
       {isLoading ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12">
-          <div className="flex flex-col items-center justify-center">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            <p className="mt-4 text-sm text-gray-600">Loading tweets...</p>
-          </div>
-        </div>
-      ) : tweets && tweets.length > 0 ? (
         <div className="space-y-4">
-          {tweets.map((tweet: Tweet) => (
+          {[...Array(3)].map((_, i) => (
+            <SkeletonTweetCard key={i} />
+          ))}
+        </div>
+      ) : filteredAndSortedTweets && filteredAndSortedTweets.length > 0 ? (
+        <div className="space-y-4">
+          {filteredAndSortedTweets.map((tweet: Tweet) => (
             <TweetCard
               key={tweet.id}
               tweet={tweet}
@@ -453,18 +631,42 @@ export default function TweetsPage() {
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
-          <div className="flex flex-col items-center">
-            <MessageSquare className="h-12 w-12 text-gray-400 mb-4" />
-            <p className="text-gray-500 font-medium">
-              {activeTab === 'with-articles'
-                ? 'No tweets with articles found. Generate articles from tweets first.'
-                : activeTab === 'ignored'
-                ? 'No ignored tweets found.'
-                : 'No tweets found. Start the bot to fetch tweets from monitored accounts.'}
-            </p>
-          </div>
-        </div>
+        <EmptyState
+          icon={MessageSquare}
+          title={
+            activeTab === 'with-articles'
+              ? 'No articles yet'
+              : activeTab === 'ignored'
+              ? 'No ignored tweets'
+              : 'No tweets found'
+          }
+          description={
+            activeTab === 'with-articles'
+              ? 'No tweets with articles found. Generate articles from tweets first.'
+              : activeTab === 'ignored'
+              ? 'No ignored tweets found.'
+              : 'No tweets found. Start the bot to fetch tweets from monitored accounts.'
+          }
+          action={
+            activeTab === 'all'
+              ? {
+                  label: 'Go to Settings',
+                  onClick: () => window.location.href = '/settings',
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {/* Progress Modal */}
+      {progressModal && (
+        <ProgressModal
+          isOpen={progressModal.isOpen}
+          title="Generating Articles"
+          total={progressModal.items.length}
+          items={progressModal.items}
+          onClose={() => setProgressModal(null)}
+        />
       )}
     </div>
   );

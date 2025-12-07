@@ -14,6 +14,8 @@ import {
   Bot,
   X
 } from 'lucide-react';
+import { useToast } from '@/app/components/ToastProvider';
+import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
 
 interface Settings {
   openaiApiKey: string | null;
@@ -50,9 +52,16 @@ async function fetchAccounts(): Promise<Account[]> {
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [testingConnection, setTestingConnection] = useState<{
+    type: 'english' | 'french' | null;
+    status: 'testing' | 'success' | 'error' | null;
+    message?: string;
+  }>({ type: null, status: null });
+  const [errors, setErrors] = useState<Record<string, string>>({});
   
   const { data: settings, isLoading: settingsLoading } = useQuery({
     queryKey: ['settings'],
@@ -85,7 +94,31 @@ export default function SettingsPage() {
     }
   }, [settings]);
 
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (formData.openaiApiKey && !formData.openaiApiKey.startsWith('sk-')) {
+      newErrors.openaiApiKey = 'OpenAI API key should start with "sk-"';
+    }
+
+    if (formData.wordpressEnglishUrl && !formData.wordpressEnglishUrl.match(/^https?:\/\/.+/)) {
+      newErrors.wordpressEnglishUrl = 'Please enter a valid URL';
+    }
+
+    if (formData.wordpressFrenchUrl && !formData.wordpressFrenchUrl.match(/^https?:\/\/.+/)) {
+      newErrors.wordpressFrenchUrl = 'Please enter a valid URL';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const handleSave = async () => {
+    if (!validateForm()) {
+      toast.showError('Please fix the errors before saving');
+      return;
+    }
+
     setSaving(true);
     try {
       const response = await fetch('/api/settings', {
@@ -102,11 +135,52 @@ export default function SettingsPage() {
       // Invalidate and refetch settings to ensure UI is updated
       await queryClient.invalidateQueries({ queryKey: ['settings'] });
       await queryClient.refetchQueries({ queryKey: ['settings'] });
-      alert('Settings saved successfully!');
+      toast.showSuccess('Settings saved successfully!');
     } catch (error: any) {
-      alert(`Error: ${error.message}`);
+      toast.showError(error.message || 'Failed to save settings');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const testWordPressConnection = async (type: 'english' | 'french') => {
+    const url = type === 'english' ? formData.wordpressEnglishUrl : formData.wordpressFrenchUrl;
+    const username = type === 'english' ? formData.wordpressEnglishUsername : formData.wordpressFrenchUsername;
+    const password = type === 'english' ? formData.wordpressEnglishPassword : formData.wordpressFrenchPassword;
+
+    if (!url || !username || !password) {
+      toast.showWarning(`Please fill in all ${type} WordPress credentials first`);
+      return;
+    }
+
+    setTestingConnection({ type, status: 'testing' });
+
+    try {
+      const response = await fetch(`/api/settings/test-wordpress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, username, password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setTestingConnection({
+          type,
+          status: 'success',
+          message: 'Connection successful!',
+        });
+        toast.showSuccess(`${type === 'english' ? 'English' : 'French'} WordPress connection successful!`);
+      } else {
+        throw new Error(data.message || 'Connection failed');
+      }
+    } catch (error: any) {
+      setTestingConnection({
+        type,
+        status: 'error',
+        message: error.message || 'Connection failed',
+      });
+      toast.showError(`${type === 'english' ? 'English' : 'French'} WordPress connection failed: ${error.message}`);
     }
   };
 
@@ -126,14 +200,14 @@ export default function SettingsPage() {
       setAccountForm({ name: '', username: '', user_id: '' });
       setShowAddAccount(false);
       await queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      alert('Account added successfully!');
+      toast.showSuccess('Account added successfully!');
     } catch (error: any) {
-      alert(`Error: ${error.message}`);
+      toast.showError(error.message || 'Failed to add account');
     }
   };
 
   const handleDeleteAccount = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this account?')) return;
+    if (!window.confirm('Are you sure you want to delete this account?')) return;
 
     try {
       const response = await fetch(`/api/accounts/${id}`, {
@@ -146,9 +220,9 @@ export default function SettingsPage() {
       }
 
       await queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      alert('Account deleted successfully!');
+      toast.showSuccess('Account deleted successfully!');
     } catch (error: any) {
-      alert(`Error: ${error.message}`);
+      toast.showError(error.message || 'Failed to delete account');
     }
   };
 
@@ -170,9 +244,9 @@ export default function SettingsPage() {
       setEditingAccount(null);
       setAccountForm({ name: '', username: '', user_id: '' });
       await queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      alert('Account updated successfully!');
+      toast.showSuccess('Account updated successfully!');
     } catch (error: any) {
-      alert(`Error: ${error.message}`);
+      toast.showError(error.message || 'Failed to update account');
     }
   };
 
@@ -213,19 +287,55 @@ export default function SettingsPage() {
             <input
               type="password"
               value={formData.openaiApiKey || ''}
-              onChange={(e) => setFormData({ ...formData, openaiApiKey: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              onChange={(e) => {
+                setFormData({ ...formData, openaiApiKey: e.target.value });
+                if (errors.openaiApiKey) {
+                  setErrors({ ...errors, openaiApiKey: '' });
+                }
+              }}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                errors.openaiApiKey ? 'border-red-300' : 'border-gray-300'
+              }`}
               placeholder="sk-..."
             />
+            {errors.openaiApiKey && (
+              <p className="mt-1 text-sm text-red-600">{errors.openaiApiKey}</p>
+            )}
           </div>
         </div>
       </div>
 
       {/* WordPress English Settings */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <div className="flex items-center space-x-3 mb-4">
-          <Globe className="h-5 w-5 text-gray-600" />
-          <h2 className="text-xl font-semibold text-gray-900">WordPress English</h2>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-3">
+            <Globe className="h-5 w-5 text-gray-600" />
+            <h2 className="text-xl font-semibold text-gray-900">WordPress English</h2>
+          </div>
+          <button
+            onClick={() => testWordPressConnection('english')}
+            disabled={testingConnection.type === 'english' && testingConnection.status === 'testing'}
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {testingConnection.type === 'english' && testingConnection.status === 'testing' ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Testing...
+              </>
+            ) : testingConnection.type === 'english' && testingConnection.status === 'success' ? (
+              <>
+                <CheckCircle className="h-4 w-4 text-green-600" />
+                Connected
+              </>
+            ) : testingConnection.type === 'english' && testingConnection.status === 'error' ? (
+              <>
+                <XCircle className="h-4 w-4 text-red-600" />
+                Failed
+              </>
+            ) : (
+              'Test Connection'
+            )}
+          </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -235,10 +345,20 @@ export default function SettingsPage() {
             <input
               type="text"
               value={formData.wordpressEnglishUrl || ''}
-              onChange={(e) => setFormData({ ...formData, wordpressEnglishUrl: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              onChange={(e) => {
+                setFormData({ ...formData, wordpressEnglishUrl: e.target.value });
+                if (errors.wordpressEnglishUrl) {
+                  setErrors({ ...errors, wordpressEnglishUrl: '' });
+                }
+              }}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                errors.wordpressEnglishUrl ? 'border-red-300' : 'border-gray-300'
+              }`}
               placeholder="https://example.com/blog"
             />
+            {errors.wordpressEnglishUrl && (
+              <p className="mt-1 text-sm text-red-600">{errors.wordpressEnglishUrl}</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -269,9 +389,35 @@ export default function SettingsPage() {
 
       {/* WordPress French Settings */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <div className="flex items-center space-x-3 mb-4">
-          <Globe className="h-5 w-5 text-gray-600" />
-          <h2 className="text-xl font-semibold text-gray-900">WordPress French</h2>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-3">
+            <Globe className="h-5 w-5 text-gray-600" />
+            <h2 className="text-xl font-semibold text-gray-900">WordPress French</h2>
+          </div>
+          <button
+            onClick={() => testWordPressConnection('french')}
+            disabled={testingConnection.type === 'french' && testingConnection.status === 'testing'}
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {testingConnection.type === 'french' && testingConnection.status === 'testing' ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Testing...
+              </>
+            ) : testingConnection.type === 'french' && testingConnection.status === 'success' ? (
+              <>
+                <CheckCircle className="h-4 w-4 text-green-600" />
+                Connected
+              </>
+            ) : testingConnection.type === 'french' && testingConnection.status === 'error' ? (
+              <>
+                <XCircle className="h-4 w-4 text-red-600" />
+                Failed
+              </>
+            ) : (
+              'Test Connection'
+            )}
+          </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -281,10 +427,20 @@ export default function SettingsPage() {
             <input
               type="text"
               value={formData.wordpressFrenchUrl || ''}
-              onChange={(e) => setFormData({ ...formData, wordpressFrenchUrl: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              onChange={(e) => {
+                setFormData({ ...formData, wordpressFrenchUrl: e.target.value });
+                if (errors.wordpressFrenchUrl) {
+                  setErrors({ ...errors, wordpressFrenchUrl: '' });
+                }
+              }}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                errors.wordpressFrenchUrl ? 'border-red-300' : 'border-gray-300'
+              }`}
               placeholder="https://example.com/blog"
             />
+            {errors.wordpressFrenchUrl && (
+              <p className="mt-1 text-sm text-red-600">{errors.wordpressFrenchUrl}</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">

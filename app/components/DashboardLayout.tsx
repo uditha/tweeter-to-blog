@@ -11,7 +11,8 @@ import {
   Menu,
   X
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import Breadcrumbs from './Breadcrumbs';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -27,6 +28,30 @@ const navigation = [
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+K or Cmd+K for search (when on tweets or articles page)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        if (pathname === '/tweets' || pathname === '/articles') {
+          const searchInput = document.querySelector('input[type="text"]') as HTMLInputElement;
+          if (searchInput) {
+            searchInput.focus();
+          }
+        }
+      }
+      
+      // Esc to close modals/sidebar
+      if (e.key === 'Escape') {
+        setSidebarOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [pathname]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -108,7 +133,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </header>
 
         {/* Page content */}
-        <main className="p-4 sm:p-6 lg:p-8">{children}</main>
+        <main className="p-4 sm:p-6 lg:p-8">
+          {pathname !== '/' && <Breadcrumbs />}
+          {children}
+        </main>
       </div>
     </div>
   );

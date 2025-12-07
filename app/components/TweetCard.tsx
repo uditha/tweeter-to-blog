@@ -1,8 +1,10 @@
 'use client';
 
 import { formatTweetDate, formatCount } from '@/app/utils/tweetParser';
-import { Eye, EyeOff, FileText, Globe, Globe2, X } from 'lucide-react';
+import { Eye, EyeOff, FileText, Globe, Globe2, X, ChevronDown, ChevronUp, Copy, ExternalLink } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useToast } from './ToastProvider';
+import MediaLightbox from './MediaLightbox';
 
 interface TweetCardProps {
   tweet: {
@@ -48,9 +50,15 @@ export default function TweetCard({
   onGenerateArticle,
   onPublish,
 }: TweetCardProps) {
+  const toast = useToast();
   const [isIgnoring, setIsIgnoring] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPublishing, setIsPublishing] = useState<{ english?: boolean; french?: boolean }>({});
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<{ images: string[]; index: number } | null>(null);
+  
+  const MAX_TEXT_LENGTH = 280;
+  const shouldTruncate = tweet.text.length > MAX_TEXT_LENGTH;
   
   // Track if article generation is in progress
   const isArticleGenerating = isGenerating;
@@ -68,6 +76,15 @@ export default function TweetCard({
   const urls = parseJson(tweet.urls);
   const hashtags = parseJson(tweet.hashtags);
   const mentions = parseJson(tweet.mentions);
+
+  const handleCopyText = () => {
+    navigator.clipboard.writeText(tweet.text);
+    toast.showSuccess('Tweet text copied to clipboard!');
+  };
+
+  const handleImageClick = (index: number) => {
+    setLightboxImage({ images: mediaUrls, index });
+  };
 
   const handleIgnore = async () => {
     if (!onIgnore) return;
@@ -106,14 +123,15 @@ export default function TweetCard({
     try {
       const response = await onPublish(tweet.id, language);
       if (response && typeof response === 'object' && response !== null && 'link' in response && response.link) {
-        // Show success message with link
-        if (window.confirm(`Article published successfully!\n\nView it at: ${response.link}\n\nClick OK to open in new tab.`)) {
+        toast.showSuccess(`Article published successfully!`, 6000);
+        // Open link in new tab after a short delay
+        setTimeout(() => {
           window.open(response.link, '_blank');
-        }
+        }, 500);
       }
     } catch (error) {
       console.error('Error publishing article:', error);
-      alert('Failed to publish article. Please try again.');
+      toast.showError('Failed to publish article. Please try again.');
     } finally {
       setIsPublishing({ ...isPublishing, [language]: false });
     }
@@ -168,16 +186,26 @@ export default function TweetCard({
           <div className="flex-shrink-0">
             <div className="flex flex-col gap-2">
               {mediaUrls.slice(0, 3).map((url, idx) => (
-                <div key={idx} className="relative">
+                <div
+                  key={idx}
+                  className="relative cursor-pointer group"
+                  onClick={() => handleImageClick(idx)}
+                  title="Click to view full size"
+                >
                   <img
                     src={url}
                     alt={`Media ${idx + 1}`}
-                    className="w-24 h-24 rounded-lg object-cover"
+                    className="w-24 h-24 rounded-lg object-cover group-hover:opacity-80 transition-opacity"
                   />
+                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 rounded-lg transition-all" />
                 </div>
               ))}
               {mediaUrls.length > 3 && (
-                <div className="w-24 h-24 rounded-lg bg-gray-100 flex items-center justify-center text-xs text-gray-500">
+                <div
+                  className="w-24 h-24 rounded-lg bg-gray-100 flex items-center justify-center text-xs text-gray-500 cursor-pointer hover:bg-gray-200 transition-colors"
+                  onClick={() => handleImageClick(3)}
+                  title="Click to view all images"
+                >
                   +{mediaUrls.length - 3}
                 </div>
               )}
@@ -225,7 +253,51 @@ export default function TweetCard({
           </div>
 
           {/* Tweet content */}
-          <p className="text-gray-800 mb-4 whitespace-pre-wrap">{tweet.text}</p>
+          <div className="mb-4">
+            <p className="text-gray-800 whitespace-pre-wrap">
+              {isExpanded || !shouldTruncate
+                ? tweet.text
+                : `${tweet.text.substring(0, MAX_TEXT_LENGTH)}...`}
+            </p>
+            {shouldTruncate && (
+              <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="mt-2 text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1"
+              >
+                {isExpanded ? (
+                  <>
+                    <ChevronUp className="h-4 w-4" />
+                    Show less
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-4 w-4" />
+                    Show more
+                  </>
+                )}
+              </button>
+            )}
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                onClick={handleCopyText}
+                className="text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-1 text-xs"
+                title="Copy tweet text"
+              >
+                <Copy className="h-3 w-3" />
+                Copy
+              </button>
+              <a
+                href={`https://twitter.com/${tweet.account_username || tweet.username}/status/${tweet.tweet_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-1 text-xs"
+                title="View on Twitter/X"
+              >
+                <ExternalLink className="h-3 w-3" />
+                View on X
+              </a>
+            </div>
+          </div>
 
           {/* URLs */}
           {urls.length > 0 && (
@@ -290,6 +362,13 @@ export default function TweetCard({
                           ? 'bg-yellow-500 text-white animate-pulse'
                           : 'bg-blue-600 text-white hover:bg-blue-700'
                       } disabled:opacity-50 disabled:cursor-not-allowed`}
+                      title={
+                        tweet.article_generated === 1
+                          ? 'Article has been generated'
+                          : isGenerating
+                          ? 'Generating article...'
+                          : 'Generate article from this tweet'
+                      }
                     >
                       <FileText className="h-4 w-4" />
                       {isGenerating
@@ -310,6 +389,13 @@ export default function TweetCard({
                   ? 'bg-green-50 text-green-700 border border-green-200'
                   : 'bg-purple-600 text-white hover:bg-purple-700'
               } disabled:opacity-50 disabled:cursor-not-allowed`}
+              title={
+                tweet.published_english === 1
+                  ? 'Article published to English WordPress'
+                  : isPublishing.english
+                  ? 'Publishing to English WordPress...'
+                  : 'Publish article to English WordPress'
+              }
             >
               <Globe className="h-4 w-4" />
               {isPublishing.english
@@ -326,6 +412,13 @@ export default function TweetCard({
                   ? 'bg-green-50 text-green-700 border border-green-200'
                   : 'bg-purple-600 text-white hover:bg-purple-700'
               } disabled:opacity-50 disabled:cursor-not-allowed`}
+              title={
+                tweet.published_french === 1
+                  ? 'Article published to French WordPress'
+                  : isPublishing.french
+                  ? 'Publishing to French WordPress...'
+                  : 'Publish article to French WordPress'
+              }
             >
               <Globe2 className="h-4 w-4" />
               {isPublishing.french
@@ -367,6 +460,15 @@ export default function TweetCard({
                 </div>
         </div>
       </div>
+
+      {/* Media Lightbox */}
+      {lightboxImage && (
+        <MediaLightbox
+          images={lightboxImage.images}
+          initialIndex={lightboxImage.index}
+          onClose={() => setLightboxImage(null)}
+        />
+      )}
     </div>
   );
 }
