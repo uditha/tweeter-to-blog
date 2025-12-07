@@ -58,7 +58,7 @@ export default function SettingsPage() {
     queryKey: ['settings'],
     queryFn: fetchSettings,
     staleTime: 0, // Always fetch fresh data
-    cacheTime: 0, // Don't cache
+    gcTime: 0, // Don't cache (gcTime replaces cacheTime in React Query v5)
   });
 
   const { data: accounts, isLoading: accountsLoading } = useQuery({
@@ -75,7 +75,7 @@ export default function SettingsPage() {
   const [accountForm, setAccountForm] = useState({ name: '', username: '', user_id: '' });
 
   useEffect(() => {
-    if (settings) {
+    if (settings && typeof settings === 'object' && 'autoMode' in settings) {
       setFormData({
         ...settings,
         autoMode: settings.autoMode ?? false,

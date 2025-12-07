@@ -155,7 +155,7 @@ export const accounts = {
 
   delete: async (id: number): Promise<boolean> => {
     const result = await pool.query('DELETE FROM accounts WHERE id = $1', [id]);
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   },
 
   update: async (id: number, name: string, username: string, user_id: string): Promise<Account | null> => {
@@ -270,7 +270,7 @@ export const tweets = {
 
   updateIgnored: async (id: number, ignored: boolean): Promise<boolean> => {
     const result = await pool.query('UPDATE tweets SET ignored = $1 WHERE id = $2', [ignored ? 1 : 0, id]);
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   },
 
   updateArticle: async (id: number, articleEnglish: string | null, articleFrench: string | null): Promise<boolean> => {
@@ -278,7 +278,7 @@ export const tweets = {
       'UPDATE tweets SET article_generated = 1, article_english = $1, article_french = $2 WHERE id = $3',
       [articleEnglish, articleFrench, id]
     );
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   },
 
   updatePublished: async (id: number, language: 'english' | 'french', published: boolean, link?: string | null): Promise<boolean> => {
@@ -291,7 +291,7 @@ export const tweets = {
       `UPDATE tweets SET ${column} = $1, ${dateColumn} = $2, ${linkColumn} = $3 WHERE id = $4`,
       [published ? 1 : 0, dateValue, linkValue, id]
     );
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   },
 
   getFiltered: async (filters: {

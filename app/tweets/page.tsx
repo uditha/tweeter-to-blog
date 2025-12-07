@@ -80,7 +80,7 @@ async function fetchTweets(filters: {
   const params = new URLSearchParams();
   if (filters.ignored !== undefined) params.append('ignored', filters.ignored.toString());
   if (filters.articleGenerated !== undefined) params.append('articleGenerated', filters.articleGenerated.toString());
-  if (filters.accountId !== undefined && filters.accountId !== '') params.append('accountId', filters.accountId.toString());
+  if (filters.accountId !== undefined && filters.accountId !== null) params.append('accountId', filters.accountId.toString());
   params.append('limit', '100');
 
   const response = await fetch(`/api/tweets?${params.toString()}`);
@@ -262,7 +262,7 @@ export default function TweetsPage() {
 
   const handleSelectAll = () => {
     if (!tweets) return;
-    const allIds = new Set(tweets.map((tweet: Tweet) => tweet.id));
+    const allIds = new Set<number>(tweets.map((tweet: Tweet) => tweet.id));
     setSelectedTweets(allIds);
   };
 

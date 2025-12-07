@@ -114,7 +114,7 @@ function parseTweetFromEntry(entry: any): ParsedTweet | null {
   }
 
   // Handle retweets - check if this is a retweet
-  let retweetedTweet: ParsedTweet | undefined;
+  let retweetedTweet: ParsedTweet | null = null;
 
   // Check for retweet structure: legacy.retweeted_status_result
   if (tweetResult.legacy?.retweeted_status_result?.result) {
