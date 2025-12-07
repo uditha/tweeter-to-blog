@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { useBotStatus } from './hooks/useBotStatus';
 import { useQuery } from '@tanstack/react-query';
 import { 
@@ -12,10 +13,12 @@ import {
   Activity,
   Globe,
   Globe2,
-  BarChart3
+  BarChart3,
+  RefreshCw
 } from 'lucide-react';
 import Link from 'next/link';
 import { SkeletonStatCard } from '@/app/components/SkeletonLoader';
+import { useToast } from '@/app/components/ToastProvider';
 
 interface Stats {
   tweets: {
@@ -62,7 +65,9 @@ function formatNumber(num: number): string {
 }
 
 export default function Dashboard() {
-  const { isRunning, isLoading, toggleBot } = useBotStatus();
+  const { isRunning, isLoading, toggleBot, runNow } = useBotStatus();
+  const [isRunningNow, setIsRunningNow] = React.useState(false);
+  const toast = useToast();
   
   const { data: stats, isLoading: statsLoading, error: statsError } = useQuery({
     queryKey: ['stats'],
@@ -212,27 +217,55 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
-          <button
-            onClick={toggleBot}
-            disabled={isLoading}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              isRunning
-                ? 'bg-red-50 text-red-700 hover:bg-red-100'
-                : 'bg-green-50 text-green-700 hover:bg-green-100'
-            } disabled:opacity-50 disabled:cursor-not-allowed`}
-          >
-            {isRunning ? (
-              <>
-                <PauseCircle className="inline h-4 w-4 mr-2" />
-                Stop Bot
-              </>
-            ) : (
-              <>
-                <PlayCircle className="inline h-4 w-4 mr-2" />
-                Start Bot
-              </>
-            )}
-          </button>
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={async () => {
+                setIsRunningNow(true);
+                try {
+                  const result = await runNow();
+                  if (result.success) {
+                    toast.showSuccess(
+                      result.accountsProcessed 
+                        ? `Scraping completed! Processed ${result.accountsProcessed} account(s).`
+                        : 'Scraping completed!'
+                    );
+                  } else {
+                    toast.showError(result.message || 'Failed to run scraping cycle');
+                  }
+                } catch (error: any) {
+                  toast.showError(error.message || 'Failed to run scraping cycle');
+                } finally {
+                  setIsRunningNow(false);
+                }
+              }}
+              disabled={isLoading || isRunningNow}
+              className="px-4 py-2 rounded-lg font-medium transition-colors bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`inline h-4 w-4 mr-2 ${isRunningNow ? 'animate-spin' : ''}`} />
+              Run Now
+            </button>
+            <button
+              onClick={toggleBot}
+              disabled={isLoading}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                isRunning
+                  ? 'bg-red-50 text-red-700 hover:bg-red-100'
+                  : 'bg-green-50 text-green-700 hover:bg-green-100'
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              {isRunning ? (
+                <>
+                  <PauseCircle className="inline h-4 w-4 mr-2" />
+                  Stop Bot
+                </>
+              ) : (
+                <>
+                  <PlayCircle className="inline h-4 w-4 mr-2" />
+                  Start Bot
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 

@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getBotStatus } from '@/lib/botStatus';
-import { startBot, stopBot } from '@/lib/bot';
+import { startBot, stopBot, restoreBotState } from '@/lib/bot';
 
 export async function POST() {
   try {
+    // Restore bot state first to ensure we have the latest status
+    await restoreBotState();
+    
     const isRunning = await getBotStatus();
     
     if (isRunning) {

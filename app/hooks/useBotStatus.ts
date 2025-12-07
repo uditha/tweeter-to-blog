@@ -47,10 +47,28 @@ export function useBotStatus() {
     }
   };
 
+  const runNow = async () => {
+    try {
+      const response = await fetch('/api/bot/run', { method: 'POST' });
+      const data = await response.json();
+      
+      if (response.ok) {
+        // Invalidate stats to refresh after scraping
+        await queryClient.invalidateQueries({ queryKey: ['stats'] });
+        return { success: data.success, message: data.message, accountsProcessed: data.accountsProcessed };
+      } else {
+        throw new Error(data.error || 'Failed to run bot cycle');
+      }
+    } catch (error: any) {
+      throw error;
+    }
+  };
+
   return {
     isRunning,
     isLoading,
     toggleBot,
+    runNow,
   };
 }
 

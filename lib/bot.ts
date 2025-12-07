@@ -1,7 +1,7 @@
 import { accounts, tweets, settings } from './db';
 import { parseTweetsFromResponse } from '@/app/utils/tweetParser';
 import type { ParsedTweet } from '@/app/utils/tweetParser';
-import { setBotStatus } from './botStatus';
+import { setBotStatus, getBotStatus } from './botStatus';
 import { generateArticle } from '@/app/actions/generateArticle';
 
 let botInterval: NodeJS.Timeout | null = null;
@@ -96,44 +96,62 @@ async function fetchTweetsForAccount(accountId: number, username: string, userId
     });
 
     if (!response.ok) {
-      console.error(`Failed to fetch tweets for ${username}: ${response.status}`);
+      console.error(`[Bot] ❌ Failed to fetch tweets for @${username}: HTTP ${response.status}`);
+      const responseText = await response.text().catch(() => '');
+      console.error(`[Bot] Response: ${responseText.substring(0, 200)}`);
       return [];
     }
 
     const data = await response.json();
     const parsedTweets = parseTweetsFromResponse(data);
+    console.log(`[Bot] 📥 Parsed ${parsedTweets.length} tweet(s) from API response for @${username}`);
     return parsedTweets;
-  } catch (error) {
-    console.error(`Error fetching tweets for ${username}:`, error);
+  } catch (error: any) {
+    console.error(`[Bot] ❌ Error fetching tweets for @${username}:`, error.message || error);
+    console.error(`[Bot] Error stack:`, error.stack);
     return [];
   }
 }
 
 async function processAccount(account: { id: number; username: string; user_id: string }) {
   try {
-    console.log(`Processing account: @${account.username} (${account.user_id})`);
+    console.log(`[Bot] Processing account: @${account.username} (ID: ${account.id}, User ID: ${account.user_id})`);
+    
+    if (!account.user_id || account.user_id.trim() === '') {
+      console.error(`[Bot] ⚠️ Account @${account.username} has no user_id configured. Skipping.`);
+      return;
+    }
     
     const fetchedTweets = await fetchTweetsForAccount(account.id, account.username, account.user_id);
+    console.log(`[Bot] Fetched ${fetchedTweets.length} tweets for @${account.username}`);
     
     // Get the newest tweet we already have for this account
     const newestTweet = await tweets.getNewestByAccount(account.id);
     const newestTweetId = newestTweet?.tweet_id;
+    console.log(`[Bot] Newest existing tweet ID for @${account.username}: ${newestTweetId || 'none'}`);
     
     let newTweetsCount = 0;
+    let foundExistingTweet = false;
     
-    // Only add tweets that are newer than what we have
+    // Process tweets and add new ones
+    // Tweets are typically returned in chronological order (newest first)
     for (const tweet of fetchedTweets) {
       // Skip invalid tweets (missing ID, text, or other required fields)
       if (!tweet.id || tweet.id === 'unknown' || !tweet.text || !tweet.userId || !tweet.userScreenName) {
+        console.log(`[Bot] ⚠️ Skipping invalid tweet: missing required fields`);
         continue; // Skip this invalid tweet
       }
       
-      // Skip if we already have this tweet
+      // Optimization: If we've already found the newest tweet we have, and we're processing
+      // tweets in chronological order (newest first), we can stop early
       if (newestTweetId && tweet.id === newestTweetId) {
+        console.log(`[Bot] ✅ Reached newest existing tweet (${tweet.id}). All subsequent tweets are already in database.`);
+        foundExistingTweet = true;
         break; // We've reached tweets we already have
       }
       
-      // Add the tweet to database
+      // Try to add the tweet to database (will return null if duplicate)
+      console.log(`[Bot] 📝 Attempting to add tweet ${tweet.id}...`);
       const savedTweet = await tweets.add({
         tweet_id: tweet.id,
         account_id: account.id,
@@ -157,6 +175,7 @@ async function processAccount(account: { id: number; username: string; user_id: 
       
       if (savedTweet) {
         newTweetsCount++;
+        console.log(`[Bot] ✅ Successfully added new tweet ${tweet.id} (${newTweetsCount} new tweet(s) so far)`);
         
         // Auto mode: Generate article if criteria are met
         try {
@@ -235,30 +254,39 @@ async function processAccount(account: { id: number; username: string; user_id: 
     }
     
     if (newTweetsCount > 0) {
-      console.log(`Added ${newTweetsCount} new tweets for @${account.username}`);
+      console.log(`[Bot] ✅ Added ${newTweetsCount} new tweet(s) for @${account.username}`);
+    } else if (foundExistingTweet) {
+      console.log(`[Bot] ℹ️ No new tweets found for @${account.username} - all fetched tweets already exist in database`);
+    } else {
+      console.log(`[Bot] ℹ️ No new tweets found for @${account.username} - no valid tweets to add`);
     }
-  } catch (error) {
-    console.error(`Error processing account ${account.id}:`, error);
+  } catch (error: any) {
+    console.error(`[Bot] ❌ Error processing account @${account.username} (ID: ${account.id}):`, error.message || error);
+    console.error(`[Bot] Error stack:`, error.stack);
   }
 }
 
-async function runBotCycle() {
+export async function runBotCycle() {
   try {
+    console.log('[Bot] 🔄 Starting bot cycle...');
     const allAccounts = await accounts.getAll();
     
     if (allAccounts.length === 0) {
-      console.log('No accounts to watch');
-      return;
+      console.log('[Bot] ⚠️ No accounts to watch');
+      return { success: false, message: 'No accounts configured. Please add accounts in Settings.' };
     }
     
-    console.log(`Running bot cycle for ${allAccounts.length} account(s)...`);
+    console.log(`[Bot] 📋 Found ${allAccounts.length} account(s) to process`);
     
     // Process all accounts in parallel
     await Promise.all(allAccounts.map(account => processAccount(account)));
     
-    console.log('Bot cycle completed');
-  } catch (error) {
-    console.error('Error in bot cycle:', error);
+    console.log('[Bot] ✅ Bot cycle completed successfully');
+    return { success: true, accountsProcessed: allAccounts.length };
+  } catch (error: any) {
+    console.error('[Bot] ❌ Error in bot cycle:', error.message || error);
+    console.error('[Bot] Error stack:', error.stack);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
 
@@ -298,13 +326,12 @@ export async function restoreBotState() {
   }
   
   try {
-    const { getBotStatus } = require('./botStatus');
     if (await getBotStatus() && !botInterval) {
-      console.log('Restoring bot state from database - bot was running before restart');
-      startBot();
+      console.log('[Bot] Restoring bot state from database - bot was running before restart');
+      await startBot();
     }
-  } catch (error) {
-    console.log('Bot restoration check skipped:', error);
+  } catch (error: any) {
+    console.log('[Bot] Bot restoration check skipped:', error.message || error);
   }
 }
 

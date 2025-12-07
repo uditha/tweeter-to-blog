@@ -58,11 +58,7 @@ async function queryWithRetry(
   throw lastError || new Error('Query failed after retries');
 }
 
-// Test connection
-pool.on('connect', () => {
-  console.log('Connected to PostgreSQL database');
-});
-
+// Handle pool errors
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
   // Don't exit process in serverless - let it handle reconnection
@@ -288,22 +284,22 @@ export const tweets = {
   },
 
   getByAccount: async (accountId: number, limit: number = 100): Promise<Tweet[]> => {
-    const result = await pool.query(`
+    const result = await queryWithRetry(() => pool.query(`
       SELECT * FROM tweets 
       WHERE account_id = $1 
       ORDER BY fetched_at DESC, id DESC 
       LIMIT $2
-    `, [accountId, limit]);
+    `, [accountId, limit]));
     return result.rows as Tweet[];
   },
 
   getNewestByAccount: async (accountId: number): Promise<Tweet | null> => {
-    const result = await pool.query(`
+    const result = await queryWithRetry(() => pool.query(`
       SELECT * FROM tweets 
       WHERE account_id = $1 
       ORDER BY fetched_at DESC, id DESC 
       LIMIT 1
-    `, [accountId]);
+    `, [accountId]));
     return result.rows[0] as Tweet | null || null;
   },
 
@@ -328,7 +324,7 @@ export const tweets = {
     raw_data: string | null;
   }): Promise<Tweet | null> => {
     try {
-      const result = await pool.query(`
+      const result = await queryWithRetry(() => pool.query(`
         INSERT INTO tweets (
           tweet_id, account_id, user_id, username, text, created_at,
           like_count, retweet_count, reply_count, quote_count, view_count,
@@ -354,7 +350,7 @@ export const tweets = {
         tweet.hashtags,
         tweet.mentions,
         tweet.raw_data
-      ]);
+      ]));
       return result.rows[0] as Tweet;
     } catch (error: any) {
       // Ignore duplicate tweet_id errors
