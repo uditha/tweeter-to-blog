@@ -12,7 +12,7 @@ export async function generateArticle(
 ) {
   try {
     // Get API key from database settings
-    const openaiApiKey = settings.get('openaiApiKey') || process.env.OPENAI_API_KEY;
+    const openaiApiKey = await settings.get('openaiApiKey') || process.env.OPENAI_API_KEY;
     
     if (!openaiApiKey) {
       console.error('[generateArticle] OpenAI API key not found in settings or environment');

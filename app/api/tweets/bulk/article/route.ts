@@ -2,106 +2,83 @@ import { NextRequest, NextResponse } from 'next/server';
 import { tweets } from '@/lib/db';
 import { generateArticle } from '@/app/actions/generateArticle';
 
-export const dynamic = 'force-dynamic';
-
 export async function POST(request: NextRequest) {
   try {
-    const { tweetIds, language } = await request.json();
+    const { tweetIds, language = 'both' } = await request.json();
 
-    if (!Array.isArray(tweetIds) || tweetIds.length === 0) {
+    if (!tweetIds || !Array.isArray(tweetIds) || tweetIds.length === 0) {
       return NextResponse.json(
-        { error: 'Invalid tweet IDs. Must be a non-empty array' },
+        { error: 'tweetIds array is required and must not be empty' },
         { status: 400 }
       );
     }
 
     if (tweetIds.length > 50) {
       return NextResponse.json(
-        { error: 'Too many tweets. Maximum 50 at a time' },
+        { error: 'Maximum 50 tweets can be processed at once' },
         { status: 400 }
       );
     }
 
-    const selectedLanguage = language || 'both';
-    const results: Array<{ id: number; success: boolean; error?: string }> = [];
+    // Get all tweets
+    const allTweets = await tweets.getAll(10000, 0);
+    const tweetsToProcess = allTweets.filter((t: any) => 
+      tweetIds.includes(t.id) && t.article_generated === 0 && t.ignored === 0
+    );
 
-    // Process tweets sequentially to avoid overwhelming the API
-    for (const tweetId of tweetIds) {
+    if (tweetsToProcess.length === 0) {
+      return NextResponse.json(
+        { error: 'No valid tweets found to process. Tweets must not be ignored and must not already have articles.' },
+        { status: 400 }
+      );
+    }
+
+    const results = {
+      total: tweetsToProcess.length,
+      successful: 0,
+      failed: 0,
+      errors: [] as Array<{ tweetId: number; error: string }>,
+    };
+
+    // Process tweets sequentially to avoid rate limiting
+    for (const tweet of tweetsToProcess) {
       try {
-        const id = parseInt(tweetId.toString());
-        if (isNaN(id)) {
-          results.push({ id: tweetId, success: false, error: 'Invalid tweet ID' });
-          continue;
-        }
-
-        // Get tweet data
-        const allTweets = tweets.getAll(10000, 0);
-        const tweet = allTweets.find((t: any) => t.id === id);
-
-        if (!tweet) {
-          results.push({ id, success: false, error: 'Tweet not found' });
-          continue;
-        }
-
-        // Skip if already generated
-        if (tweet.article_generated === 1) {
-          results.push({ id, success: true, error: 'Article already generated' });
-          continue;
-        }
-
-        // Parse media URLs
-        let mediaUrls = '';
-        try {
-          const media = tweet.media_urls ? JSON.parse(tweet.media_urls) : [];
-          if (Array.isArray(media)) {
-            mediaUrls = media.map((m: any) => typeof m === 'string' ? m : m.mediaUrl || m.url).join(', ');
-          }
-        } catch {
-          mediaUrls = tweet.media_urls || '';
-        }
-
-        // Generate articles
-        const articles = await generateArticle(
+        // Generate article
+        const articleData = await generateArticle(
           tweet.text,
-          mediaUrls,
-          selectedLanguage as 'english' | 'french' | 'both'
+          tweet.media_urls || '',
+          language as 'english' | 'french' | 'both'
         );
 
-        // Update database
-        const articleEnglish = articles.en ? JSON.stringify(articles.en) : null;
-        const articleFrench = articles.fr ? JSON.stringify(articles.fr) : null;
-
-        const success = tweets.updateArticle(id, articleEnglish, articleFrench);
+        // Update tweet with article data
+        const articleEnglish = articleData.en ? JSON.stringify(articleData.en) : null;
+        const articleFrench = articleData.fr ? JSON.stringify(articleData.fr) : null;
         
-        if (success) {
-          results.push({ id, success: true });
-        } else {
-          results.push({ id, success: false, error: 'Failed to update database' });
-        }
+        await tweets.updateArticle(tweet.id, articleEnglish, articleFrench);
+        results.successful++;
+
+        // Add a small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (error: any) {
-        results.push({ id: tweetId, success: false, error: error.message || 'Unknown error' });
+        results.failed++;
+        results.errors.push({
+          tweetId: tweet.id,
+          error: error.message || 'Unknown error',
+        });
+        console.error(`Error generating article for tweet ${tweet.id}:`, error);
       }
     }
 
-    const successCount = results.filter(r => r.success).length;
-    const failureCount = results.length - successCount;
-
     return NextResponse.json({
       success: true,
-      total: tweetIds.length,
-      successCount,
-      failureCount,
       results,
+      message: `Processed ${results.successful} of ${results.total} tweets successfully.`,
     });
   } catch (error: any) {
-    console.error('[Bulk Article Generation] Error:', error);
+    console.error('Error in bulk article generation:', error);
     return NextResponse.json(
-      { error: 'Failed to generate articles', message: error.message },
+      { error: 'Failed to process bulk article generation', message: error.message },
       { status: 500 }
     );
   }
 }
-
-
-
-

@@ -1,7 +1,8 @@
-import { accounts, tweets } from './db';
+import { accounts, tweets, settings } from './db';
 import { parseTweetsFromResponse } from '@/app/utils/tweetParser';
 import type { ParsedTweet } from '@/app/utils/tweetParser';
 import { setBotStatus } from './botStatus';
+import { generateArticle } from '@/app/actions/generateArticle';
 
 let botInterval: NodeJS.Timeout | null = null;
 const BOT_INTERVAL_MS = 60 * 1000; // 1 minute
@@ -115,7 +116,7 @@ async function processAccount(account: { id: number; username: string; user_id: 
     const fetchedTweets = await fetchTweetsForAccount(account.id, account.username, account.user_id);
     
     // Get the newest tweet we already have for this account
-    const newestTweet = tweets.getNewestByAccount(account.id);
+    const newestTweet = await tweets.getNewestByAccount(account.id);
     const newestTweetId = newestTweet?.tweet_id;
     
     let newTweetsCount = 0;
@@ -133,7 +134,7 @@ async function processAccount(account: { id: number; username: string; user_id: 
       }
       
       // Add the tweet to database
-      tweets.add({
+      const savedTweet = await tweets.add({
         tweet_id: tweet.id,
         account_id: account.id,
         user_id: tweet.userId,
@@ -154,7 +155,83 @@ async function processAccount(account: { id: number; username: string; user_id: 
         raw_data: JSON.stringify(tweet.raw),
       });
       
-      newTweetsCount++;
+      if (savedTweet) {
+        newTweetsCount++;
+        
+        // Auto mode: Generate article if criteria are met
+        try {
+          const autoModeEnabled = await settings.getBoolean('autoMode', false);
+          console.log(`[Auto Mode] Check for tweet ${savedTweet.id}: autoModeEnabled=${autoModeEnabled}`);
+          
+          if (autoModeEnabled) {
+            // Skip if article already generated
+            if (savedTweet.article_generated === 1) {
+              console.log(`[Auto Mode] ⏭️ Skipping tweet ${savedTweet.id} - article already generated`);
+            } else {
+              const autoModeMinChars = parseInt(await settings.get('autoModeMinChars') || '100');
+              const autoModeRequireMedia = await settings.getBoolean('autoModeRequireMedia', true);
+            
+            console.log(`[Auto Mode] Settings: minChars=${autoModeMinChars}, requireMedia=${autoModeRequireMedia}`);
+            
+            // Check media from both the parsed tweet and saved tweet
+            const hasMediaFromTweet = tweet.media && tweet.media.length > 0;
+            
+            // Parse media_urls from saved tweet (it's stored as JSON string)
+            let hasMediaFromSaved = false;
+            if (savedTweet.media_urls) {
+              try {
+                const parsedMedia = JSON.parse(savedTweet.media_urls);
+                hasMediaFromSaved = Array.isArray(parsedMedia) && parsedMedia.length > 0;
+              } catch (e) {
+                // If not JSON, check if it's a non-empty string
+                hasMediaFromSaved = savedTweet.media_urls !== 'null' && savedTweet.media_urls.trim() !== '';
+              }
+            }
+            
+            const hasMedia = hasMediaFromTweet || hasMediaFromSaved;
+            
+            // Use saved tweet text (what's actually in database) for character count
+            const tweetText = savedTweet.text || tweet.text || '';
+            const tweetTextLength = tweetText.length;
+            const meetsCharCount = tweetTextLength >= autoModeMinChars;
+            const meetsMediaRequirement = !autoModeRequireMedia || hasMedia;
+            
+            console.log(`[Auto Mode] Tweet ${savedTweet.id} check:`);
+            console.log(`  - Text: "${tweetText.substring(0, 50)}..."`);
+            console.log(`  - Text length: ${tweetTextLength} (required: ${autoModeMinChars})`);
+            console.log(`  - Has media (from tweet): ${hasMediaFromTweet}`);
+            console.log(`  - Has media (from saved): ${hasMediaFromSaved}`);
+            console.log(`  - Meets char count: ${meetsCharCount}`);
+            console.log(`  - Meets media requirement: ${meetsMediaRequirement} (requireMedia=${autoModeRequireMedia})`);
+            
+            if (meetsCharCount && meetsMediaRequirement) {
+              try {
+                console.log(`[Auto Mode] ✅ Generating article for tweet ${savedTweet.id} (${tweetTextLength} chars, has media: ${hasMedia})`);
+                const mediaUrls = savedTweet.media_urls || (tweet.media ? JSON.stringify(tweet.media.map(m => m.mediaUrl)) : '');
+                const articleData = await generateArticle(tweetText, mediaUrls, 'both');
+                
+                const articleEnglish = articleData.en ? JSON.stringify(articleData.en) : null;
+                const articleFrench = articleData.fr ? JSON.stringify(articleData.fr) : null;
+                
+                await tweets.updateArticle(savedTweet.id, articleEnglish, articleFrench);
+                console.log(`[Auto Mode] ✅ Successfully generated article for tweet ${savedTweet.id}`);
+              } catch (error: any) {
+                console.error(`[Auto Mode] ❌ Error generating article for tweet ${savedTweet.id}:`, error.message);
+                console.error(`[Auto Mode] Error stack:`, error.stack);
+                // Don't throw - continue processing other tweets
+              }
+            } else {
+              console.log(`[Auto Mode] ⏭️ Skipping tweet ${savedTweet.id} - doesn't meet criteria (chars: ${meetsCharCount}, media: ${meetsMediaRequirement})`);
+            }
+            }
+          } else {
+            console.log(`[Auto Mode] ⏭️ Auto mode disabled, skipping article generation for tweet ${savedTweet.id}`);
+          }
+        } catch (error: any) {
+          console.error(`[Auto Mode] ❌ Error checking auto mode settings:`, error.message);
+          // Continue processing - don't fail the whole tweet addition
+        }
+      }
     }
     
     if (newTweetsCount > 0) {
@@ -167,7 +244,7 @@ async function processAccount(account: { id: number; username: string; user_id: 
 
 async function runBotCycle() {
   try {
-    const allAccounts = accounts.getAll();
+    const allAccounts = await accounts.getAll();
     
     if (allAccounts.length === 0) {
       console.log('No accounts to watch');
@@ -185,14 +262,14 @@ async function runBotCycle() {
   }
 }
 
-export function startBot() {
+export async function startBot() {
   if (botInterval) {
     console.log('Bot is already running');
     return;
   }
   
   console.log('Starting bot...');
-  setBotStatus(true);
+  await setBotStatus(true);
   
   // Run immediately
   runBotCycle();
@@ -203,18 +280,18 @@ export function startBot() {
   console.log('Bot started. Will check for new tweets every minute.');
 }
 
-export function stopBot() {
+export async function stopBot() {
   if (botInterval) {
     clearInterval(botInterval);
     botInterval = null;
   }
-  setBotStatus(false);
+  await setBotStatus(false);
   console.log('Bot stopped');
 }
 
 // Function to restore bot state from database
 // Call this on server startup to restore bot if it was running
-export function restoreBotState() {
+export async function restoreBotState() {
   if (typeof window !== 'undefined') {
     // Don't run on client side
     return;
@@ -222,7 +299,7 @@ export function restoreBotState() {
   
   try {
     const { getBotStatus } = require('./botStatus');
-    if (getBotStatus() && !botInterval) {
+    if (await getBotStatus() && !botInterval) {
       console.log('Restoring bot state from database - bot was running before restart');
       startBot();
     }

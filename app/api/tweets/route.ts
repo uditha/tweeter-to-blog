@@ -1,38 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { tweets } from '@/lib/db';
 
-export const dynamic = 'force-dynamic';
-
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const limit = parseInt(searchParams.get('limit') || '100');
     const offset = parseInt(searchParams.get('offset') || '0');
+    const ignored = searchParams.get('ignored');
+    const articleGenerated = searchParams.get('articleGenerated');
+    const publishedEnglish = searchParams.get('publishedEnglish');
+    const publishedFrench = searchParams.get('publishedFrench');
+    const accountId = searchParams.get('accountId');
 
-    // Parse filters
     const filters: any = {};
-    if (searchParams.has('ignored')) {
-      filters.ignored = searchParams.get('ignored') === 'true';
-    }
-    if (searchParams.has('articleGenerated')) {
-      filters.articleGenerated = searchParams.get('articleGenerated') === 'true';
-    }
-    if (searchParams.has('publishedEnglish')) {
-      filters.publishedEnglish = searchParams.get('publishedEnglish') === 'true';
-    }
-    if (searchParams.has('publishedFrench')) {
-      filters.publishedFrench = searchParams.get('publishedFrench') === 'true';
-    }
-    if (searchParams.has('accountId')) {
-      filters.accountId = parseInt(searchParams.get('accountId') || '0');
-    }
+    if (ignored !== null) filters.ignored = ignored === 'true';
+    if (articleGenerated !== null) filters.articleGenerated = articleGenerated === 'true';
+    if (publishedEnglish !== null) filters.publishedEnglish = publishedEnglish === 'true';
+    if (publishedFrench !== null) filters.publishedFrench = publishedFrench === 'true';
+    if (accountId !== null) filters.accountId = parseInt(accountId);
 
-    // Use filtered query if filters are provided, otherwise use getAll
-    const allTweets = Object.keys(filters).length > 0
-      ? tweets.getFiltered(filters, limit, offset)
-      : tweets.getAll(limit, offset);
-    
-    return NextResponse.json({ tweets: allTweets });
+    const allTweets = await tweets.getFiltered(filters, limit, offset);
+    return NextResponse.json(allTweets);
   } catch (error: any) {
     console.error('Error fetching tweets:', error);
     return NextResponse.json(

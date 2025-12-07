@@ -1,29 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Filter, RefreshCw, FileText, Globe, Globe2, CheckSquare, Square } from 'lucide-react';
 import TweetCard from '@/app/components/TweetCard';
-
-// Client-only time display to avoid hydration errors
-function TimeDisplay({ date }: { date: Date }) {
-  const [timeString, setTimeString] = useState<string>('');
-  
-  useEffect(() => {
-    setTimeString(date.toLocaleTimeString());
-  }, [date]);
-  
-  if (!timeString) return <span>...</span>;
-  return <span>{timeString}</span>;
-}
+import { Filter, RefreshCw, User, FileText, MessageSquare, EyeOff, Sparkles, Loader2, CheckSquare, Square } from 'lucide-react';
 
 interface Tweet {
   id: number;
   tweet_id: string;
-  account_id: number;
   account_name?: string;
   account_username?: string;
-  user_id: string;
   username: string;
   text: string;
   created_at: string;
@@ -38,7 +24,6 @@ interface Tweet {
   urls: string | null;
   hashtags: string | null;
   mentions: string | null;
-  fetched_at: string;
   ignored: number;
   article_generated: number;
   article_english: string | null;
@@ -49,113 +34,128 @@ interface Tweet {
   published_french_link: string | null;
 }
 
-interface Filters {
-  ignored?: boolean;
-  articleGenerated?: boolean;
-  publishedEnglish?: boolean;
-  publishedFrench?: boolean;
-  accountId?: number;
+interface Account {
+  id: number;
+  name: string;
+  username: string;
+  user_id: string;
+  created_at: string;
 }
 
-async function fetchTweets(filters: Filters = {}, page: number = 1, limit: number = 20) {
-  const params = new URLSearchParams({
-    limit: limit.toString(),
-    offset: ((page - 1) * limit).toString(),
-  });
+type TabType = 'all' | 'with-articles' | 'ignored';
 
+interface TabConfig {
+  id: TabType;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  description: string;
+}
+
+const TABS: TabConfig[] = [
+  {
+    id: 'all',
+    label: 'All Tweets',
+    icon: MessageSquare,
+    description: 'View all tweets from monitored accounts',
+  },
+  {
+    id: 'with-articles',
+    label: 'With Articles',
+    icon: FileText,
+    description: 'Tweets with generated articles',
+  },
+  {
+    id: 'ignored',
+    label: 'Ignored',
+    icon: EyeOff,
+    description: 'Tweets that have been ignored',
+  },
+];
+
+async function fetchTweets(filters: {
+  ignored?: boolean;
+  articleGenerated?: boolean;
+  accountId?: number;
+}) {
+  const params = new URLSearchParams();
   if (filters.ignored !== undefined) params.append('ignored', filters.ignored.toString());
   if (filters.articleGenerated !== undefined) params.append('articleGenerated', filters.articleGenerated.toString());
-  if (filters.publishedEnglish !== undefined) params.append('publishedEnglish', filters.publishedEnglish.toString());
-  if (filters.publishedFrench !== undefined) params.append('publishedFrench', filters.publishedFrench.toString());
-  if (filters.accountId !== undefined) params.append('accountId', filters.accountId.toString());
+  if (filters.accountId !== undefined && filters.accountId !== '') params.append('accountId', filters.accountId.toString());
+  params.append('limit', '100');
 
   const response = await fetch(`/api/tweets?${params.toString()}`);
   if (!response.ok) throw new Error('Failed to fetch tweets');
   return response.json();
 }
 
-async function fetchAccounts() {
+async function fetchAccounts(): Promise<Account[]> {
   const response = await fetch('/api/accounts');
   if (!response.ok) throw new Error('Failed to fetch accounts');
   return response.json();
 }
 
-type TabType = 'notGenerated' | 'generated';
-
 export default function TweetsPage() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<TabType>('notGenerated');
-  const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState<Filters>({});
-  const [showFilters, setShowFilters] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [activeTab, setActiveTab] = useState<TabType>('all');
   const [selectedTweets, setSelectedTweets] = useState<Set<number>>(new Set());
-  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+  const [accountFilter, setAccountFilter] = useState<number | undefined>(undefined);
+  const [isBulkGenerating, setIsBulkGenerating] = useState(false);
 
-  const { data: accountsData } = useQuery({
+  const { data: accounts, isLoading: accountsLoading } = useQuery({
     queryKey: ['accounts'],
     queryFn: fetchAccounts,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   });
 
-  // Update filters based on active tab
-  useEffect(() => {
-    // Reset auto-switch flag when manually changing tabs
-    setShouldAutoSwitch(false);
-    
-    if (activeTab === 'generated') {
-      // Show only tweets with articles generated
-      setFilters({ articleGenerated: true });
-      setPage(1);
-    } else {
-      // Show tweets without articles generated
-      setFilters({ articleGenerated: false });
-      setPage(1);
+  // Build filters based on active tab
+  const filters = useMemo(() => {
+    const baseFilters: {
+      ignored?: boolean;
+      articleGenerated?: boolean;
+      accountId?: number;
+    } = {};
+
+    switch (activeTab) {
+      case 'with-articles':
+        baseFilters.articleGenerated = true;
+        baseFilters.ignored = false;
+        break;
+      case 'ignored':
+        baseFilters.ignored = true;
+        break;
+      case 'all':
+      default:
+        // Exclude ignored tweets and tweets with articles from "All Tweets"
+        baseFilters.ignored = false;
+        baseFilters.articleGenerated = false; // Only show tweets without articles
+        break;
     }
-    setSelectedTweets(new Set()); // Clear selection when switching tabs
-  }, [activeTab]);
 
-  const { data, isLoading, refetch } = useQuery({
-    queryKey: ['tweets', filters, page, activeTab],
-    queryFn: () => fetchTweets(filters, page, 20),
-    refetchInterval: 2000, // Refetch every 2 seconds for faster updates
-    staleTime: 0, // Always consider data stale to get fresh results
+    if (accountFilter) {
+      baseFilters.accountId = accountFilter;
+    }
+
+    return baseFilters;
+  }, [activeTab, accountFilter]);
+
+  const { data: tweets, isLoading: tweetsLoading, refetch } = useQuery({
+    queryKey: ['tweets', filters, activeTab],
+    queryFn: () => fetchTweets(filters),
+    refetchInterval: 5000, // Refetch every 5 seconds
+    staleTime: 0, // Always consider stale for real-time updates
   });
 
-  // Track if we should auto-switch tabs (only after generating articles)
-  const [shouldAutoSwitch, setShouldAutoSwitch] = useState(false);
-
-  // SSE for real-time updates
-  useEffect(() => {
-    const eventSource = new EventSource('/api/tweets/stream');
-    
-    eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'tweet_update' || data.type === 'article_update') {
-        setLastUpdate(new Date());
-        // Immediately refetch when article is generated
-        refetch();
-        
-        // Only auto-switch if we're expecting it (after generating articles)
-        if (data.type === 'article_update' && shouldAutoSwitch && activeTab === 'notGenerated') {
-          setTimeout(() => {
-            setActiveTab('generated');
-            setShouldAutoSwitch(false); // Reset flag
-            refetch();
-          }, 2000);
-        }
+  const handleSelect = (id: number, selected: boolean) => {
+    setSelectedTweets((prev) => {
+      const newSelected = new Set(prev);
+      if (selected) {
+        newSelected.add(id);
+      } else {
+        newSelected.delete(id);
       }
-    };
-
-    eventSource.onerror = (error) => {
-      console.error('SSE error:', error);
-      // Don't close on error, let it reconnect
-    };
-
-    return () => {
-      eventSource.close();
-    };
-  }, [refetch, activeTab, shouldAutoSwitch]);
-
+      return newSelected;
+    });
+  };
 
   const handleIgnore = async (id: number, ignored: boolean) => {
     try {
@@ -164,44 +164,34 @@ export default function TweetsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ignored }),
       });
-      if (response.ok) {
-        refetch();
+
+      if (!response.ok) {
+        throw new Error('Failed to update tweet');
       }
-    } catch (error) {
-      console.error('Error ignoring tweet:', error);
+
+      await queryClient.invalidateQueries({ queryKey: ['tweets'] });
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
     }
   };
 
   const handleGenerateArticle = async (id: number) => {
     try {
-      console.log(`[Frontend] Generating article for tweet ${id}`);
-      
-      // Set flag to allow auto-switching after generation completes
-      setShouldAutoSwitch(true);
-      
       const response = await fetch(`/api/tweets/${id}/article`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ language: 'both' }),
       });
-      
-      const data = await response.json();
-      
-      if (response.ok) {
-        console.log(`[Frontend] Article generation started for tweet ${id}`);
-        // Immediately refetch to see the update
-        setTimeout(() => {
-          refetch();
-        }, 1000);
-      } else {
-        setShouldAutoSwitch(false); // Reset if generation failed
-        console.error('[Frontend] Error generating article:', data);
-        alert(`Failed to generate article: ${data.error || data.message || 'Unknown error'}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to generate article');
       }
+
+      await queryClient.invalidateQueries({ queryKey: ['tweets'] });
+      alert('Article generation started! This may take a few moments.');
     } catch (error: any) {
-      setShouldAutoSwitch(false); // Reset if generation failed
-      console.error('[Frontend] Error generating article:', error);
-      alert(`Failed to generate article: ${error.message || 'Please try again.'}`);
+      alert(`Error: ${error.message}`);
     }
   };
 
@@ -212,443 +202,269 @@ export default function TweetsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ language, published: true }),
       });
-      if (response.ok) {
-        const data = await response.json();
-        refetch();
-        return data; // Return the response data including the link
-      } else {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to publish');
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to publish article');
       }
+
+      const data = await response.json();
+      await queryClient.invalidateQueries({ queryKey: ['tweets'] });
+      return { link: data.link };
     } catch (error: any) {
-      console.error('Error publishing article:', error);
+      alert(`Error: ${error.message}`);
       throw error;
-    }
-  };
-
-  const tweets: Tweet[] = data?.tweets || [];
-  const hasMore = tweets.length === 20;
-
-  const handleSelectTweet = (id: number, selected: boolean) => {
-    setSelectedTweets(prev => {
-      const newSet = new Set(prev);
-      if (selected) {
-        newSet.add(id);
-      } else {
-        newSet.delete(id);
-      }
-      return newSet;
-    });
-  };
-
-  const handleSelectAll = () => {
-    if (selectedTweets.size === tweets.length) {
-      setSelectedTweets(new Set());
-    } else {
-      setSelectedTweets(new Set(tweets.map(t => t.id)));
     }
   };
 
   const handleBulkGenerateArticles = async () => {
     if (selectedTweets.size === 0) {
-      alert('Please select at least one tweet');
+      alert('Please select at least one tweet to generate articles for.');
       return;
     }
 
-    setIsBulkProcessing(true);
-    // Set flag to allow auto-switching after bulk generation completes
-    setShouldAutoSwitch(true);
-    
+    if (!confirm(`Generate articles for ${selectedTweets.size} selected tweet(s)? This may take several minutes.`)) {
+      return;
+    }
+
+    setIsBulkGenerating(true);
     try {
       const response = await fetch('/api/tweets/bulk/article', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           tweetIds: Array.from(selectedTweets),
-          language: 'both'
+          language: 'both',
         }),
       });
 
-      const data = await response.json();
-      
-      if (response.ok) {
-        alert(`Bulk article generation completed!\n\nSuccess: ${data.successCount}\nFailed: ${data.failureCount}`);
-        setSelectedTweets(new Set());
-        
-        // Invalidate all tweet queries to force refresh
-        queryClient.invalidateQueries({ 
-          queryKey: ['tweets'],
-          exact: false // Invalidate all queries that start with 'tweets'
-        });
-        
-        // Immediate refetch
-        await refetch();
-        
-        // Multiple refetches to ensure UI updates (articles may take time to generate)
-        setTimeout(() => {
-          refetch();
-          queryClient.invalidateQueries({ queryKey: ['tweets'], exact: false });
-        }, 1000);
-        setTimeout(() => {
-          refetch();
-          queryClient.invalidateQueries({ queryKey: ['tweets'], exact: false });
-        }, 2000);
-        setTimeout(() => {
-          refetch();
-          queryClient.invalidateQueries({ queryKey: ['tweets'], exact: false });
-        }, 3000);
-        
-        // Auto-switch will happen via SSE when articles are detected
-      } else {
-        setShouldAutoSwitch(false); // Reset if generation failed
-        alert(`Error: ${data.error || 'Failed to generate articles'}`);
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to generate articles');
       }
+
+      const data = await response.json();
+      await queryClient.invalidateQueries({ queryKey: ['tweets'] });
+      setSelectedTweets(new Set()); // Clear selection
+
+      alert(
+        `Bulk article generation completed!\n\n` +
+        `✅ Successful: ${data.results.successful}\n` +
+        `❌ Failed: ${data.results.failed}\n` +
+        `📊 Total: ${data.results.total}`
+      );
     } catch (error: any) {
-      setShouldAutoSwitch(false); // Reset if generation failed
-      alert(`Error: ${error.message || 'Failed to generate articles'}`);
+      alert(`Error: ${error.message}`);
     } finally {
-      setIsBulkProcessing(false);
+      setIsBulkGenerating(false);
     }
   };
 
-  const handleBulkPublish = async (language: 'english' | 'french') => {
-    if (selectedTweets.size === 0) {
-      alert('Please select at least one tweet');
-      return;
-    }
-
-    // Filter to only tweets with articles generated
-    const tweetsWithArticles = tweets.filter(t => 
-      selectedTweets.has(t.id) && t.article_generated === 1
-    );
-
-    if (tweetsWithArticles.length === 0) {
-      alert('Selected tweets must have articles generated first');
-      return;
-    }
-
-    if (!confirm(`Publish ${tweetsWithArticles.length} article(s) to WordPress (${language})?`)) {
-      return;
-    }
-
-    setIsBulkProcessing(true);
-    try {
-      const response = await fetch('/api/tweets/bulk/publish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          tweetIds: tweetsWithArticles.map(t => t.id),
-          language
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (response.ok) {
-        alert(`Bulk publishing completed!\n\nSuccess: ${data.successCount}\nFailed: ${data.failureCount}`);
-        setSelectedTweets(new Set());
-        
-        // Invalidate all tweet queries to force refresh
-        queryClient.invalidateQueries({ 
-          queryKey: ['tweets'],
-          exact: false // Invalidate all queries that start with 'tweets'
-        });
-        
-        // Immediate refetch
-        await refetch();
-        
-        // Multiple refetches to ensure UI updates
-        setTimeout(() => {
-          refetch();
-          queryClient.invalidateQueries({ queryKey: ['tweets'], exact: false });
-        }, 1000);
-        setTimeout(() => {
-          refetch();
-          queryClient.invalidateQueries({ queryKey: ['tweets'], exact: false });
-        }, 2000);
-        setTimeout(() => {
-          refetch();
-          queryClient.invalidateQueries({ queryKey: ['tweets'], exact: false });
-        }, 3000);
-      } else {
-        alert(`Error: ${data.error || 'Failed to publish articles'}`);
-      }
-    } catch (error: any) {
-      alert(`Error: ${error.message || 'Failed to publish articles'}`);
-    } finally {
-      setIsBulkProcessing(false);
-    }
+  const handleSelectAll = () => {
+    if (!tweets) return;
+    const allIds = new Set(tweets.map((tweet: Tweet) => tweet.id));
+    setSelectedTweets(allIds);
   };
+
+  const handleDeselectAll = () => {
+    setSelectedTweets(new Set());
+  };
+
+  const selectableTweets = tweets?.filter((tweet: Tweet) => 
+    tweet.article_generated === 0 && tweet.ignored === 0
+  ) || [];
+  
+  const allSelectableSelected = selectableTweets.length > 0 && 
+    selectableTweets.every((tweet: Tweet) => selectedTweets.has(tweet.id));
+
+  const activeTabConfig = TABS.find((tab) => tab.id === activeTab);
+  const isLoading = tweetsLoading || accountsLoading;
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Tweets</h1>
-          <p className="text-gray-600 mt-1">
-            Manage and filter collected tweets
-            {lastUpdate && (
-              <span className="ml-2 text-xs text-gray-500">
-                Last update: <TimeDisplay date={lastUpdate} />
-              </span>
-            )}
+          <p className="mt-2 text-sm text-gray-600">
+            {activeTabConfig?.description || 'View and manage tweets from monitored accounts'}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {selectedTweets.size > 0 && activeTab !== 'with-articles' && (
+            <button
+              onClick={handleBulkGenerateArticles}
+              disabled={isBulkGenerating}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 transition-colors"
+              aria-label="Generate articles for selected tweets"
+            >
+              {isBulkGenerating ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Generating...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  <span>Generate Articles ({selectedTweets.size})</span>
+                </>
+              )}
+            </button>
+          )}
           <button
             onClick={() => refetch()}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+            disabled={isLoading}
+            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 transition-colors"
+            aria-label="Refresh tweets"
           >
-            <RefreshCw className="h-4 w-4" />
-            Refresh
-          </button>
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-              showFilters
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            <Filter className="h-4 w-4" />
-            Filters
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
           </button>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
-          <button
-            onClick={() => setActiveTab('notGenerated')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'notGenerated'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            Not Generated
-          </button>
-          <button
-            onClick={() => setActiveTab('generated')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'generated'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            Generated
-          </button>
-        </nav>
-      </div>
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="border-b border-gray-200">
+          <nav className="flex -mb-px" aria-label="Tabs">
+            {TABS.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              const tabTweets = tweets?.filter((tweet: Tweet) => {
+                if (tab.id === 'with-articles') return tweet.article_generated === 1;
+                if (tab.id === 'ignored') return tweet.ignored === 1;
+                return true;
+              });
+              const count = tabTweets?.length || 0;
 
-      {/* Bulk Actions Bar */}
-      {selectedTweets.size > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-blue-900">
-              {selectedTweets.size} tweet{selectedTweets.size !== 1 ? 's' : ''} selected
-            </span>
-            <button
-              onClick={handleSelectAll}
-              className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
-            >
-              {selectedTweets.size === tweets.length ? (
-                <>
-                  <CheckSquare className="h-4 w-4" />
-                  Deselect All
-                </>
-              ) : (
-                <>
-                  <Square className="h-4 w-4" />
-                  Select All
-                </>
-              )}
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleBulkGenerateArticles}
-              disabled={isBulkProcessing}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <FileText className="h-4 w-4" />
-              {isBulkProcessing ? 'Generating...' : 'Generate Articles'}
-            </button>
-            <button
-              onClick={() => handleBulkPublish('english')}
-              disabled={isBulkProcessing}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <Globe className="h-4 w-4" />
-              Publish (EN)
-            </button>
-            <button
-              onClick={() => handleBulkPublish('french')}
-              disabled={isBulkProcessing}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <Globe2 className="h-4 w-4" />
-              Publish (FR)
-            </button>
-            <button
-              onClick={() => setSelectedTweets(new Set())}
-              className="px-4 py-2 text-gray-700 hover:text-gray-900"
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Filters */}
-      {showFilters && (
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Filter Tweets</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={filters.ignored === true}
-                onChange={(e) =>
-                  setFilters({ ...filters, ignored: e.target.checked ? true : undefined })
-                }
-                className="rounded border-gray-300"
-              />
-              <span className="text-sm text-gray-700">Show Ignored</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={filters.articleGenerated === true}
-                onChange={(e) =>
-                  setFilters({
-                    ...filters,
-                    articleGenerated: e.target.checked ? true : undefined,
-                  })
-                }
-                className="rounded border-gray-300"
-              />
-              <span className="text-sm text-gray-700">Articles Generated</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={filters.publishedEnglish === true}
-                onChange={(e) =>
-                  setFilters({
-                    ...filters,
-                    publishedEnglish: e.target.checked ? true : undefined,
-                  })
-                }
-                className="rounded border-gray-300"
-              />
-              <span className="text-sm text-gray-700">Published (EN)</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={filters.publishedFrench === true}
-                onChange={(e) =>
-                  setFilters({
-                    ...filters,
-                    publishedFrench: e.target.checked ? true : undefined,
-                  })
-                }
-                className="rounded border-gray-300"
-              />
-              <span className="text-sm text-gray-700">Published (FR)</span>
-            </label>
-            {accountsData?.accounts && (
-              <div className="md:col-span-2 lg:col-span-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Filter by Account
-                </label>
-                <select
-                  value={filters.accountId || ''}
-                  onChange={(e) =>
-                    setFilters({
-                      ...filters,
-                      accountId: e.target.value ? parseInt(e.target.value) : undefined,
-                    })
-                  }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    setSelectedTweets(new Set()); // Clear selection on tab change
+                  }}
+                  className={`
+                    flex items-center space-x-2 px-6 py-4 text-sm font-medium border-b-2 transition-colors
+                    ${
+                      isActive
+                        ? 'border-blue-500 text-blue-600 bg-blue-50'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }
+                  `}
+                  aria-current={isActive ? 'page' : undefined}
                 >
-                  <option value="">All Accounts</option>
-                  {accountsData.accounts.map((account: any) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name} (@{account.username})
-                    </option>
-                  ))}
-                </select>
+                  <Icon className="h-5 w-5" />
+                  <span>{tab.label}</span>
+                  {count > 0 && (
+                    <span
+                      className={`
+                        ml-2 px-2 py-0.5 text-xs font-semibold rounded-full
+                        ${isActive ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}
+                      `}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Filters and Bulk Actions */}
+        <div className="p-4 border-b border-gray-200 bg-gray-50">
+          <div className="flex flex-col gap-4">
+            {/* Account Filter */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex items-center space-x-2">
+                <Filter className="h-4 w-4 text-gray-500" />
+                <span className="text-sm font-medium text-gray-700">Filter by Account:</span>
+              </div>
+              <select
+                value={accountFilter || ''}
+                onChange={(e) => setAccountFilter(e.target.value ? parseInt(e.target.value) : undefined)}
+                className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+                aria-label="Filter by account"
+              >
+                <option value="">All Accounts</option>
+                {accounts?.map((account: Account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name} (@{account.username})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Bulk Selection Actions - Only show in "All Tweets" tab */}
+            {activeTab === 'all' && selectableTweets.length > 0 && (
+              <div className="flex items-center justify-between pt-2 border-t border-gray-200">
+                <div className="flex items-center space-x-2 text-sm text-gray-600">
+                  <span>
+                    {selectedTweets.size > 0 
+                      ? `${selectedTweets.size} of ${selectableTweets.length} selected`
+                      : `${selectableTweets.length} tweets available for article generation`}
+                  </span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={allSelectableSelected ? handleDeselectAll : handleSelectAll}
+                    className="px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors flex items-center space-x-1"
+                  >
+                    {allSelectableSelected ? (
+                      <>
+                        <CheckSquare className="h-4 w-4" />
+                        <span>Deselect All</span>
+                      </>
+                    ) : (
+                      <>
+                        <Square className="h-4 w-4" />
+                        <span>Select All</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             )}
           </div>
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={() => setFilters({})}
-              className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900"
-            >
-              Clear Filters
-            </button>
-          </div>
         </div>
-      )}
+      </div>
 
       {/* Tweets List */}
-      {isLoading && tweets.length === 0 ? (
-        <div className="text-center py-12 bg-white border border-gray-200 rounded-lg">
-          <p className="text-gray-500">Loading tweets...</p>
+      {isLoading ? (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12">
+          <div className="flex flex-col items-center justify-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <p className="mt-4 text-sm text-gray-600">Loading tweets...</p>
+          </div>
         </div>
-      ) : tweets.length === 0 ? (
-        <div className="text-center py-12 bg-white border border-gray-200 rounded-lg">
-          <p className="text-gray-500 mb-4">
-            {activeTab === 'generated' 
-              ? 'No generated tweets found.' 
-              : 'No tweets found.'}
-          </p>
-          <p className="text-sm text-gray-400">
-            {activeTab === 'generated'
-              ? 'Tweets with generated articles will appear here.'
-              : 'Tweets without generated articles will appear here. Select tweets and click "Generate Articles" to create articles.'}
-          </p>
+      ) : tweets && tweets.length > 0 ? (
+        <div className="space-y-4">
+          {tweets.map((tweet: Tweet) => (
+            <TweetCard
+              key={tweet.id}
+              tweet={tweet}
+              selected={selectedTweets.has(tweet.id)}
+              onSelect={handleSelect}
+              onIgnore={handleIgnore}
+              onGenerateArticle={handleGenerateArticle}
+              onPublish={handlePublish}
+            />
+          ))}
         </div>
       ) : (
-        <>
-          <div className="space-y-4">
-            {tweets.map((tweet) => (
-              <TweetCard
-                key={tweet.id}
-                tweet={tweet}
-                selected={selectedTweets.has(tweet.id)}
-                onSelect={handleSelectTweet}
-                onIgnore={handleIgnore}
-                onGenerateArticle={handleGenerateArticle}
-                onPublish={handlePublish}
-              />
-            ))}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+          <div className="flex flex-col items-center">
+            <MessageSquare className="h-12 w-12 text-gray-400 mb-4" />
+            <p className="text-gray-500 font-medium">
+              {activeTab === 'with-articles'
+                ? 'No tweets with articles found. Generate articles from tweets first.'
+                : activeTab === 'ignored'
+                ? 'No ignored tweets found.'
+                : 'No tweets found. Start the bot to fetch tweets from monitored accounts.'}
+            </p>
           </div>
-
-          {/* Pagination */}
-          <div className="flex justify-center gap-4 pt-6">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Previous
-            </button>
-            <span className="px-4 py-2 text-gray-700">Page {page}</span>
-            <button
-              onClick={() => setPage((p) => p + 1)}
-              disabled={!hasMore}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Next
-            </button>
-          </div>
-        </>
+        </div>
       )}
     </div>
   );

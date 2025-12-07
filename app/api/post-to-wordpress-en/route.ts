@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { settings, tweets } from '@/lib/db';
 
-export const dynamic = 'force-dynamic';
+import { settings, tweets } from '@/lib/db';
 
 async function uploadImageToWordPress(
   imageUrl: string,
@@ -87,9 +86,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Get WordPress configuration
-    const wpUrl = settings.get('wordpressEnglishUrl');
-    const wpUsername = settings.get('wordpressEnglishUsername');
-    const wpPassword = settings.get('wordpressEnglishPassword');
+    const wpUrl = await settings.get('wordpressEnglishUrl');
+    const wpUsername = await settings.get('wordpressEnglishUsername');
+    const wpPassword = await settings.get('wordpressEnglishPassword');
 
     if (!wpUrl || !wpUsername || !wpPassword) {
       return NextResponse.json(
@@ -159,12 +158,7 @@ export async function POST(request: NextRequest) {
         link: postData.link,
       });
     } else {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = { error: await response.text() };
-      }
+      const errorData = await response.json().catch(() => ({ error: await response.text() }));
       return NextResponse.json(
         {
           error: `WordPress API error: ${response.status}`,

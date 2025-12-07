@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { tweets } from '@/lib/db';
 
-export const dynamic = 'force-dynamic';
-
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -18,8 +16,7 @@ export async function POST(
       );
     }
 
-    const success = tweets.updateIgnored(id, ignored);
-    
+    const success = await tweets.updateIgnored(id, ignored);
     if (!success) {
       return NextResponse.json(
         { error: 'Tweet not found' },
@@ -36,7 +33,3 @@ export async function POST(
     );
   }
 }
-
-
-
-

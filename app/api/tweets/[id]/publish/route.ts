@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { settings, tweets } from '@/lib/db';
 import { Buffer } from 'buffer';
 
-export const dynamic = 'force-dynamic';
-
 async function uploadImageToWordPress(
   imageUrl: string,
   wpUrl: string,
@@ -74,47 +72,11 @@ async function uploadImageToWordPress(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: { id: string } }
 ) {
   try {
-    console.log('[Publish Route] Request received');
-    
-    // Handle both sync and async params (Next.js 14+)
-    const resolvedParams = params instanceof Promise ? await params : params;
-    console.log('[Publish Route] Params resolved:', resolvedParams);
-    
-    if (!resolvedParams || !resolvedParams.id) {
-      console.error('[Publish Route] Missing tweet ID parameter');
-      return NextResponse.json(
-        { error: 'Missing tweet ID parameter' },
-        { status: 400 }
-      );
-    }
-    
-    const id = parseInt(resolvedParams.id);
-    
-    if (isNaN(id)) {
-      console.error('[Publish Route] Invalid tweet ID:', resolvedParams.id);
-      return NextResponse.json(
-        { error: 'Invalid tweet ID' },
-        { status: 400 }
-      );
-    }
-    
-    let body;
-    try {
-      body = await request.json();
-      console.log('[Publish Route] Request body parsed');
-    } catch (error: any) {
-      console.error('[Publish Route] Error parsing request body:', error.message);
-      return NextResponse.json(
-        { error: 'Invalid request body' },
-        { status: 400 }
-      );
-    }
-    
-    const { language, published } = body;
-    console.log('[Publish Route] Processing tweet:', { id, language, published });
+    const id = parseInt(params.id);
+    const { language, published } = await request.json();
 
     if (isNaN(id)) {
       return NextResponse.json(
@@ -131,34 +93,19 @@ export async function POST(
     }
 
     // Get tweet data
-    console.log('[Publish Route] Fetching tweet from database');
-    let allTweets;
-    try {
-      allTweets = tweets.getAll(10000, 0);
-      console.log('[Publish Route] Retrieved', allTweets.length, 'tweets from database');
-    } catch (error: any) {
-      console.error('[Publish Route] Database error:', error.message);
-      return NextResponse.json(
-        { error: 'Database error', message: error.message },
-        { status: 500 }
-      );
-    }
-    
+    const allTweets = await tweets.getAll(10000, 0);
     const tweet = allTweets.find((t: any) => t.id === id);
 
     if (!tweet) {
-      console.error('[Publish Route] Tweet not found:', id);
       return NextResponse.json(
         { error: 'Tweet not found' },
         { status: 404 }
       );
     }
-    
-    console.log('[Publish Route] Tweet found:', { id: tweet.id, username: tweet.username });
 
     if (!published) {
       // Just update the database status and clear the link
-      const success = tweets.updatePublished(id, language, false, null);
+      const success = await tweets.updatePublished(id, language, false, null);
       if (!success) {
         return NextResponse.json(
           { error: 'Failed to update tweet status' },
@@ -214,9 +161,9 @@ export async function POST(
     }
 
     // Get WordPress configuration
-    const wpUrl = settings.get(language === 'english' ? 'wordpressEnglishUrl' : 'wordpressFrenchUrl');
-    const wpUsername = settings.get(language === 'english' ? 'wordpressEnglishUsername' : 'wordpressFrenchUsername');
-    const wpPassword = settings.get(language === 'english' ? 'wordpressEnglishPassword' : 'wordpressFrenchPassword');
+    const wpUrl = await settings.get(language === 'english' ? 'wordpressEnglishUrl' : 'wordpressFrenchUrl');
+    const wpUsername = await settings.get(language === 'english' ? 'wordpressEnglishUsername' : 'wordpressFrenchUsername');
+    const wpPassword = await settings.get(language === 'english' ? 'wordpressEnglishPassword' : 'wordpressFrenchPassword');
 
     if (!wpUrl || !wpUsername || !wpPassword) {
       return NextResponse.json(
@@ -276,7 +223,7 @@ export async function POST(
     const publishData = await response.json();
 
     // Update database with publishing status
-    const success = tweets.updatePublished(id, language, true, publishData.link);
+    const success = await tweets.updatePublished(id, language, true, publishData.link);
     
     if (!success) {
       return NextResponse.json(
@@ -292,14 +239,9 @@ export async function POST(
       message: `Article published successfully to ${language} WordPress site`
     });
   } catch (error: any) {
-    console.error('[Publish Route] Unexpected error:', error);
-    console.error('[Publish Route] Error stack:', error.stack);
+    console.error('Error publishing article:', error);
     return NextResponse.json(
-      { 
-        error: 'Failed to publish article', 
-        message: error.message || 'Unknown error',
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      },
+      { error: 'Failed to publish article', message: error.message },
       { status: 500 }
     );
   }

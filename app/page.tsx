@@ -1,100 +1,66 @@
 'use client';
 
-import { useState } from 'react';
+import { useBotStatus } from './hooks/useBotStatus';
 import { useQuery } from '@tanstack/react-query';
-import { useBotStatus } from '@/app/hooks/useBotStatus';
 import { 
   MessageSquare, 
   FileText, 
-  Globe, 
-  Globe2, 
+  Settings, 
+  PlayCircle, 
+  PauseCircle,
+  Users,
   Activity,
-  TrendingUp,
-  Settings,
-  Play,
-  Pause
+  Globe,
+  Globe2,
+  BarChart3
 } from 'lucide-react';
 import Link from 'next/link';
-// Removed server-side import - using API instead
 
 interface Stats {
-  totalTweets: number;
-  totalAccounts: number;
-  articlesGenerated: number;
-  publishedEnglish: number;
-  publishedFrench: number;
-  ignoredTweets: number;
+  tweets: {
+    total: number;
+    active: number;
+    withArticles: number;
+    ignored: number;
+    publishedEnglish: number;
+    publishedFrench: number;
+    publishedTotal: number;
+  };
+  accounts: {
+    total: number;
+  };
+  engagement: {
+    totalLikes: number;
+    totalRetweets: number;
+    totalReplies: number;
+    totalViews: number;
+  };
+  conversion: {
+    articleRate: number;
+    publishRate: number;
+  };
 }
 
 async function fetchStats(): Promise<Stats> {
   const response = await fetch('/api/stats');
   if (!response.ok) throw new Error('Failed to fetch stats');
-  const data = await response.json();
-  return data;
+  return response.json();
+}
+
+function formatNumber(num: number): string {
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+  return num.toString();
 }
 
 export default function Dashboard() {
-  const [isToggling, setIsToggling] = useState(false);
-  const { isRunning: isBotRunning, toggleBot } = useBotStatus();
-
+  const { isRunning, isLoading, toggleBot } = useBotStatus();
+  
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['stats'],
     queryFn: fetchStats,
-    refetchInterval: 10000, // Refetch every 10 seconds
+    refetchInterval: 30000, // Refetch every 30 seconds
   });
-
-  const handleToggleBot = async () => {
-    setIsToggling(true);
-    try {
-      await toggleBot();
-    } catch (error) {
-      console.error('Error toggling bot:', error);
-    } finally {
-      setIsToggling(false);
-    }
-  };
-
-  const statCards = [
-    {
-      title: 'Total Tweets',
-      value: stats?.totalTweets || 0,
-      icon: MessageSquare,
-      color: 'blue',
-      href: '/tweets',
-    },
-    {
-      title: 'Watched Accounts',
-      value: stats?.totalAccounts || 0,
-      icon: Activity,
-      color: 'purple',
-      href: '/settings',
-    },
-    {
-      title: 'Articles Generated',
-      value: stats?.articlesGenerated || 0,
-      icon: FileText,
-      color: 'green',
-      href: '/articles',
-    },
-    {
-      title: 'Published (EN)',
-      value: stats?.publishedEnglish || 0,
-      icon: Globe,
-      color: 'indigo',
-    },
-    {
-      title: 'Published (FR)',
-      value: stats?.publishedFrench || 0,
-      icon: Globe2,
-      color: 'pink',
-    },
-    {
-      title: 'Ignored Tweets',
-      value: stats?.ignoredTweets || 0,
-      icon: TrendingUp,
-      color: 'gray',
-    },
-  ];
 
   return (
     <div className="space-y-6">
@@ -102,62 +68,146 @@ export default function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600 mt-1">
-            Monitor Twitter accounts and manage article generation
+          <p className="mt-2 text-sm text-gray-600">
+            Monitor Twitter/X accounts and manage your content pipeline
           </p>
         </div>
-        <Link
-          href="/settings"
-          className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-        >
-          <Settings className="h-5 w-5" />
-          Settings
-        </Link>
       </div>
 
-      {/* Bot Control */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
+      {/* Stats Grid */}
+      {statsLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 animate-pulse">
+              <div className="h-4 bg-gray-200 rounded w-3/4 mb-4"></div>
+              <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+            </div>
+          ))}
+        </div>
+      ) : stats ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Total Tweets */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Total Tweets</p>
+                <p className="text-3xl font-bold text-gray-900 mt-2">{formatNumber(stats.tweets.total)}</p>
+              </div>
+              <div className="p-3 bg-blue-100 rounded-lg">
+                <MessageSquare className="h-6 w-6 text-blue-600" />
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <p className="text-xs text-gray-500">
+                {stats.tweets.active} active • {stats.tweets.ignored} ignored
+              </p>
+            </div>
+          </div>
+
+          {/* Tweets with Articles */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">With Articles</p>
+                <p className="text-3xl font-bold text-gray-900 mt-2">{formatNumber(stats.tweets.withArticles)}</p>
+              </div>
+              <div className="p-3 bg-purple-100 rounded-lg">
+                <FileText className="h-6 w-6 text-purple-600" />
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex items-center space-x-1">
+                <BarChart3 className="h-3 w-3 text-gray-400" />
+                <p className="text-xs text-gray-500">
+                  {stats.conversion.articleRate}% conversion rate
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Published Articles */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Published</p>
+                <p className="text-3xl font-bold text-gray-900 mt-2">{formatNumber(stats.tweets.publishedTotal)}</p>
+              </div>
+              <div className="p-3 bg-green-100 rounded-lg">
+                <Globe className="h-6 w-6 text-green-600" />
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex items-center space-x-3 text-xs">
+                <span className="text-gray-500">
+                  <Globe className="inline h-3 w-3 mr-1" />
+                  {stats.tweets.publishedEnglish} EN
+                </span>
+                <span className="text-gray-500">
+                  <Globe2 className="inline h-3 w-3 mr-1" />
+                  {stats.tweets.publishedFrench} FR
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Total Accounts */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Monitored Accounts</p>
+                <p className="text-3xl font-bold text-gray-900 mt-2">{stats.accounts.total}</p>
+              </div>
+              <div className="p-3 bg-indigo-100 rounded-lg">
+                <Users className="h-6 w-6 text-indigo-600" />
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <Link 
+                href="/settings" 
+                className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
+              >
+                Manage accounts →
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Bot Status Card */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className={`p-3 rounded-lg ${
-              isBotRunning ? 'bg-green-100' : 'bg-gray-100'
-            }`}>
-              {isBotRunning ? (
-                <Activity className={`h-6 w-6 ${
-                  isBotRunning ? 'text-green-600' : 'text-gray-600'
-                }`} />
+          <div className="flex items-center space-x-4">
+            <div className={`p-3 rounded-full ${isRunning ? 'bg-green-100' : 'bg-gray-100'}`}>
+              {isRunning ? (
+                <Activity className={`h-6 w-6 ${isRunning ? 'text-green-600' : 'text-gray-600'}`} />
               ) : (
-                <Pause className="h-6 w-6 text-gray-600" />
+                <PauseCircle className="h-6 w-6 text-gray-600" />
               )}
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">
-                Twitter Monitor
-              </h3>
+              <h2 className="text-lg font-semibold text-gray-900">Bot Status</h2>
               <p className="text-sm text-gray-600">
-                {isBotRunning
-                  ? 'Bot is running and checking for new tweets every minute'
-                  : 'Bot is stopped. Start it to begin monitoring accounts'}
+                {isRunning ? 'Bot is actively monitoring accounts' : 'Bot is currently stopped'}
               </p>
             </div>
           </div>
           <button
-            onClick={handleToggleBot}
-            disabled={isToggling}
-            className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-colors ${
-              isBotRunning
-                ? 'bg-red-600 text-white hover:bg-red-700'
-                : 'bg-green-600 text-white hover:bg-green-700'
+            onClick={toggleBot}
+            disabled={isLoading}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              isRunning
+                ? 'bg-red-50 text-red-700 hover:bg-red-100'
+                : 'bg-green-50 text-green-700 hover:bg-green-100'
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
-            {isBotRunning ? (
+            {isRunning ? (
               <>
-                <Pause className="h-5 w-5" />
+                <PauseCircle className="inline h-4 w-4 mr-2" />
                 Stop Bot
               </>
             ) : (
               <>
-                <Play className="h-5 w-5" />
+                <PlayCircle className="inline h-4 w-4 mr-2" />
                 Start Bot
               </>
             )}
@@ -165,92 +215,86 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {statCards.map((stat) => {
-          const Icon = stat.icon;
-          const colorClasses = {
-            blue: 'bg-blue-100 text-blue-600',
-            purple: 'bg-purple-100 text-purple-600',
-            green: 'bg-green-100 text-green-600',
-            indigo: 'bg-indigo-100 text-indigo-600',
-            pink: 'bg-pink-100 text-pink-600',
-            gray: 'bg-gray-100 text-gray-600',
-          };
-
-          const content = (
-            <div className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-4">
-                <div className={`p-3 rounded-lg ${colorClasses[stat.color as keyof typeof colorClasses]}`}>
-                  <Icon className="h-6 w-6" />
-                </div>
-                {stat.href && (
-                  <Link
-                    href={stat.href}
-                    className="text-sm text-gray-500 hover:text-gray-700"
-                  >
-                    View →
-                  </Link>
-                )}
-              </div>
-              <h3 className="text-sm font-medium text-gray-600 mb-1">
-                {stat.title}
-              </h3>
-              <p className="text-3xl font-bold text-gray-900">
-                {statsLoading ? '...' : stat.value.toLocaleString()}
-              </p>
-            </div>
-          );
-
-          return stat.href ? (
-            <Link key={stat.title} href={stat.href}>
-              {content}
-            </Link>
-          ) : (
-            <div key={stat.title}>{content}</div>
-          );
-        })}
-      </div>
-
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Link
           href="/tweets"
-          className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow"
+          className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
         >
-          <div className="flex items-center gap-4">
+          <div className="flex items-center space-x-4">
             <div className="p-3 bg-blue-100 rounded-lg">
               <MessageSquare className="h-6 w-6 text-blue-600" />
             </div>
             <div className="flex-1">
-              <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                View All Tweets
-              </h3>
-              <p className="text-sm text-gray-600">
-                Browse, filter, and manage collected tweets
-              </p>
+              <h3 className="text-lg font-semibold text-gray-900">Tweets</h3>
+              <p className="text-sm text-gray-600">View and manage tweets</p>
+              {stats && (
+                <p className="text-xs text-gray-500 mt-1">
+                  {stats.tweets.active} tweets ready for articles
+                </p>
+              )}
             </div>
           </div>
         </Link>
 
         <Link
           href="/articles"
-          className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow"
+          className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
         >
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-green-100 rounded-lg">
-              <FileText className="h-6 w-6 text-green-600" />
+          <div className="flex items-center space-x-4">
+            <div className="p-3 bg-purple-100 rounded-lg">
+              <FileText className="h-6 w-6 text-purple-600" />
             </div>
             <div className="flex-1">
-              <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                Generated Articles
-              </h3>
-              <p className="text-sm text-gray-600">
-                View and manage generated articles
-              </p>
+              <h3 className="text-lg font-semibold text-gray-900">Articles</h3>
+              <p className="text-sm text-gray-600">View generated articles</p>
+              {stats && (
+                <p className="text-xs text-gray-500 mt-1">
+                  {stats.tweets.withArticles} articles generated
+                </p>
+              )}
             </div>
           </div>
         </Link>
+
+        <Link
+          href="/settings"
+          className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+        >
+          <div className="flex items-center space-x-4">
+            <div className="p-3 bg-gray-100 rounded-lg">
+              <Settings className="h-6 w-6 text-gray-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-gray-900">Settings</h3>
+              <p className="text-sm text-gray-600">Configure your account</p>
+              {stats && (
+                <p className="text-xs text-gray-500 mt-1">
+                  {stats.accounts.total} accounts configured
+                </p>
+              )}
+            </div>
+          </div>
+        </Link>
+      </div>
+
+      {/* Info Section */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-blue-900 mb-2">Getting Started</h3>
+        <ul className="space-y-2 text-sm text-blue-800">
+          <li className="flex items-start">
+            <span className="mr-2">•</span>
+            <span>Add Twitter/X accounts to monitor in Settings</span>
+          </li>
+          <li className="flex items-start">
+            <span className="mr-2">•</span>
+            <span>Start the bot to begin fetching tweets automatically</span>
+          </li>
+          <li className="flex items-start">
+            <span className="mr-2">•</span>
+            <span>Generate articles from tweets and publish to WordPress</span>
+          </li>
+        </ul>
       </div>
     </div>
   );
