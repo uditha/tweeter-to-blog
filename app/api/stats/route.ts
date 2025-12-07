@@ -4,8 +4,29 @@ import { pool } from '@/lib/db';
 export async function GET() {
   let client;
   try {
-    // Get a client from the pool with timeout handling
-    client = await pool.connect();
+    // Get a client from the pool with timeout handling and retry
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        client = await Promise.race([
+          pool.connect(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Connection timeout')), 8000)
+          )
+        ]) as any;
+        break;
+      } catch (error: any) {
+        retries--;
+        if (retries === 0 || !error.message?.includes('timeout') && !error.message?.includes('Connection')) {
+          throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    if (!client) {
+      throw new Error('Failed to get database client after retries');
+    }
     
     // Use SQL aggregations for accurate counts - much more efficient and accurate
     const statsQuery = `
@@ -29,10 +50,11 @@ export async function GET() {
     const statsResult = await client.query(statsQuery);
     const stats = statsResult.rows[0];
 
-    // Get account count
+    // Get account count - use direct query to ensure fresh data (no caching)
     const accountsQuery = 'SELECT COUNT(*) as total FROM accounts';
     const accountsResult = await client.query(accountsQuery);
-    const totalAccounts = parseInt(accountsResult.rows[0].total, 10) || 0;
+    // PostgreSQL COUNT returns as string, parse it
+    const totalAccounts = parseInt(String(accountsResult.rows[0]?.total || '0'), 10);
 
     // Parse stats (PostgreSQL returns strings for bigint)
     const totalTweets = parseInt(stats.total_tweets, 10) || 0;

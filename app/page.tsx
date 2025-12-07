@@ -69,6 +69,8 @@ export default function Dashboard() {
     queryFn: fetchStats,
     refetchInterval: 30000, // Refetch every 30 seconds
     retry: 2,
+    staleTime: 0, // Always consider stale to get fresh data
+    gcTime: 0, // Don't cache
   });
 
   return (

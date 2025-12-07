@@ -13,10 +13,10 @@ const poolConfig: any = {
     rejectUnauthorized: false,
   },
   // Optimize for serverless: fewer connections, shorter timeouts
-  max: isServerless ? 1 : 20, // Serverless functions should use 1 connection
+  max: isServerless ? 1 : 5, // Serverless functions should use 1 connection, local can use more
   min: 0, // Allow pool to shrink to 0
   idleTimeoutMillis: isServerless ? 10000 : 30000, // Shorter timeout for serverless
-  connectionTimeoutMillis: isServerless ? 10000 : 2000, // Longer timeout for initial connection
+  connectionTimeoutMillis: isServerless ? 10000 : 8000, // 8s for local, 10s for serverless
 };
 
 // Add serverless-specific option if supported
@@ -80,8 +80,32 @@ pool.on('connect', (client) => {
 
 // Initialize tables
 async function initializeTables() {
-  const client = await pool.connect();
+  let client;
   try {
+    // Use retry logic for connection
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        client = await Promise.race([
+          pool.connect(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Connection timeout')), 5000)
+          )
+        ]) as any;
+        break;
+      } catch (error: any) {
+        retries--;
+        if (retries === 0 || !error.message?.includes('timeout') && !error.message?.includes('Connection')) {
+          throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    if (!client) {
+      throw new Error('Failed to get database client for initialization');
+    }
+    
     await client.query(`
       CREATE TABLE IF NOT EXISTS accounts (
         id SERIAL PRIMARY KEY,
@@ -139,9 +163,15 @@ async function initializeTables() {
     console.log('Database tables initialized');
   } catch (error) {
     console.error('Error initializing tables:', error);
-    throw error;
+    // Don't throw - allow app to continue, will retry on first use
   } finally {
-    client.release();
+    if (client) {
+      try {
+        client.release();
+      } catch (releaseError) {
+        // Ignore release errors
+      }
+    }
   }
 }
 
@@ -154,7 +184,8 @@ function ensureInitialized(): Promise<void> {
       console.error('Database initialization error:', error);
       // Don't throw - allow retry on first use
       initializationPromise = null;
-      throw error;
+      // Return resolved promise so app can continue
+      return Promise.resolve();
     });
   }
   return initializationPromise;
@@ -212,7 +243,7 @@ export interface Tweet {
 // Account operations
 export const accounts = {
   getAll: async (): Promise<Account[]> => {
-    const result = await pool.query('SELECT * FROM accounts ORDER BY created_at DESC');
+    const result = await queryWithRetry(() => pool.query('SELECT * FROM accounts ORDER BY created_at DESC'));
     return result.rows as Account[];
   },
 
@@ -246,13 +277,13 @@ export const accounts = {
 // Tweet operations
 export const tweets = {
   getAll: async (limit: number = 100, offset: number = 0): Promise<Tweet[]> => {
-    const result = await pool.query(`
+    const result = await queryWithRetry(() => pool.query(`
       SELECT t.*, a.name as account_name, a.username as account_username
       FROM tweets t
       LEFT JOIN accounts a ON t.account_id = a.id
       ORDER BY t.fetched_at DESC, t.id DESC
       LIMIT $1 OFFSET $2
-    `, [limit, offset]);
+    `, [limit, offset]));
     return result.rows as any[];
   },
 
@@ -424,15 +455,15 @@ export const tweets = {
 // Settings operations
 export const settings = {
   get: async (key: string): Promise<string | null> => {
-    const result = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
+    const result = await queryWithRetry(() => pool.query('SELECT value FROM settings WHERE key = $1', [key]));
     return result.rows[0]?.value || null;
   },
 
   set: async (key: string, value: string): Promise<void> => {
-    await pool.query(
+    await queryWithRetry(() => pool.query(
       'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2',
       [key, value]
-    );
+    ));
   },
 
   getBoolean: async (key: string, defaultValue: boolean = false): Promise<boolean> => {
@@ -448,30 +479,45 @@ export const settings = {
 
 // Initialize default settings if they don't exist
 async function initializeDefaultSettings() {
-  const defaultSettings = {
-    openaiApiKey: 'process.env.OPENAI_API_KEY || ""',
-    wordpressEnglishUrl: 'https://udimaxweb.com/blog',
-    wordpressEnglishUsername: 'udimax',
-    wordpressEnglishPassword: 'process.env.WORDPRESS_ENGLISH_PASSWORD || ""',
-    autoMode: 'false',
-    autoModeMinChars: '100',
-    autoModeRequireMedia: 'true',
-  };
+  try {
+    const defaultSettings = {
+      openaiApiKey: 'process.env.OPENAI_API_KEY || ""',
+      wordpressEnglishUrl: 'https://udimaxweb.com/blog',
+      wordpressEnglishUsername: 'udimax',
+      wordpressEnglishPassword: 'process.env.WORDPRESS_ENGLISH_PASSWORD || ""',
+      autoMode: 'false',
+      autoModeMinChars: '100',
+      autoModeRequireMedia: 'true',
+    };
 
-  for (const [key, value] of Object.entries(defaultSettings)) {
-    const existing = await settings.get(key);
-    if (existing === null) {
-      if (key === 'autoMode' || key === 'autoModeRequireMedia') {
-        await settings.setBoolean(key, value === 'true');
-      } else {
-        await settings.set(key, value);
+    for (const [key, value] of Object.entries(defaultSettings)) {
+      try {
+        const existing = await settings.get(key);
+        if (existing === null) {
+          if (key === 'autoMode' || key === 'autoModeRequireMedia') {
+            await settings.setBoolean(key, value === 'true');
+          } else {
+            await settings.set(key, value);
+          }
+        }
+      } catch (error) {
+        // Skip individual setting errors, continue with others
+        console.warn(`Failed to initialize setting ${key}:`, error);
       }
     }
+  } catch (error) {
+    // Don't fail the entire app if settings initialization fails
+    console.error('Database initialization error:', error);
   }
 }
 
-// Initialize default settings
-initializeDefaultSettings().catch(console.error);
+// Initialize default settings (non-blocking, won't crash app if it fails)
+if (typeof window === 'undefined') {
+  // Only run on server side
+  initializeDefaultSettings().catch((error) => {
+    console.error('Failed to initialize default settings:', error);
+  });
+}
 
 export { pool };
 export default pool;
