@@ -7,8 +7,8 @@ import { runBotCycle } from '@/lib/bot';
  */
 export async function POST() {
   try {
-    const result = await runBotCycle();
-    return NextResponse.json({ 
+    const result = await runBotCycle(true);
+    return NextResponse.json({
       success: result.success,
       message: result.message || 'Bot cycle completed',
       accountsProcessed: result.accountsProcessed,
@@ -17,10 +17,10 @@ export async function POST() {
   } catch (error: any) {
     console.error('Error running bot cycle:', error);
     return NextResponse.json(
-      { 
+      {
         success: false,
-        error: 'Failed to run bot cycle', 
-        message: error.message 
+        error: 'Failed to run bot cycle',
+        message: error.message
       },
       { status: 500 }
     );

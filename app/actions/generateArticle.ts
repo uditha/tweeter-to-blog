@@ -132,11 +132,11 @@ async function addMessage(
         break;
 
       case 'english':
-        prompt = `Generate an article in English based on the following tweet: "${content}" and the associated media URLs: ${mediaUrlsString}. Target a UK audience. Use the following JSON structure for the output: { "en": { "title": "Article title", "article": "Article content with HTML tags for structure" } }`;
+        prompt = `Generate an article in English based on the following tweet: "${content}" and the associated media URLs: ${mediaUrlsString}. Target a global audience. Use the following JSON structure for the output: { "en": { "title": "Article title", "article": "Article content with HTML tags for structure" } }`;
         break;
 
       case 'english_from_french':
-        prompt = `Generate a COMPLETELY DIFFERENT article in English based on the core idea from this tweet: "${content}" and the associated media URLs: ${mediaUrlsString}. The article should have a different title, different h2 headings, and a completely different structure from a potential French version. Focus on creating unique content that would appeal to a UK audience and be optimized for Google SEO. DO NOT TRANSLATE any existing content. Instead, create an entirely new article that explores the same core topic but from a fresh perspective. Use the following JSON structure for the output: { "en": { "title": "Unique English article title", "article": "Unique English article content with HTML tags for structure" } }`;
+        prompt = `Generate a COMPLETELY DIFFERENT article in English based on the core idea from this tweet: "${content}" and the associated media URLs: ${mediaUrlsString}. The article should have a different title, different h2 headings, and a completely different structure from a potential French version. Focus on creating unique content that would appeal to a global english speaking audience and be optimized for Google SEO. DO NOT TRANSLATE any existing content. Instead, create an entirely new article that explores the same core topic but from a fresh perspective. Use the following JSON structure for the output: { "en": { "title": "Unique English article title", "article": "Unique English article content with HTML tags for structure" } }`;
         break;
 
       default:

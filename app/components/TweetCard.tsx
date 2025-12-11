@@ -39,7 +39,7 @@ interface TweetCardProps {
   onSelect?: (id: number, selected: boolean) => void;
   onIgnore?: (id: number, ignored: boolean) => void;
   onGenerateArticle?: (id: number) => void;
-  onPublish?: (id: number, language: 'english' | 'french') => Promise<{ link: string } | void>;
+  onPublish?: (id: number, language: 'english' | 'french', status: 'draft' | 'publish') => Promise<{ link: string } | void>;
 }
 
 export default function TweetCard({
@@ -54,12 +54,13 @@ export default function TweetCard({
   const [isIgnoring, setIsIgnoring] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPublishing, setIsPublishing] = useState<{ english?: boolean; french?: boolean }>({});
+  const [publishStatus, setPublishStatus] = useState<'draft' | 'publish'>('draft');
   const [isExpanded, setIsExpanded] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<{ images: string[]; index: number } | null>(null);
-  
+
   const MAX_TEXT_LENGTH = 280;
   const shouldTruncate = tweet.text.length > MAX_TEXT_LENGTH;
-  
+
   // Track if article generation is in progress
   const isArticleGenerating = isGenerating;
 
@@ -121,7 +122,7 @@ export default function TweetCard({
     if (!onPublish) return;
     setIsPublishing({ ...isPublishing, [language]: true });
     try {
-      const response = await onPublish(tweet.id, language);
+      const response = await onPublish(tweet.id, language, publishStatus);
       if (response && typeof response === 'object' && response !== null && 'link' in response && response.link) {
         toast.showSuccess(`Article published successfully!`, 6000);
         // Open link in new tab after a short delay
@@ -349,127 +350,135 @@ export default function TweetCard({
             )}
           </div>
 
-                {/* Actions */}
-                <div className="flex flex-wrap gap-2 pt-4 border-t border-gray-100">
-                  {onGenerateArticle && (
-                    <button
-                      onClick={handleGenerateArticle}
-                      disabled={isGenerating || tweet.article_generated === 1}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        tweet.article_generated === 1
-                          ? 'bg-green-50 text-green-700 border border-green-200'
-                          : isGenerating
-                          ? 'bg-yellow-500 text-white animate-pulse'
-                          : 'bg-blue-600 text-white hover:bg-blue-700'
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
-                      title={
-                        tweet.article_generated === 1
-                          ? 'Article has been generated'
-                          : isGenerating
-                          ? 'Generating article...'
-                          : 'Generate article from this tweet'
-                      }
-                    >
-                      <FileText className="h-4 w-4" />
-                      {isGenerating
-                        ? 'Writing Article...'
-                        : tweet.article_generated === 1
-                        ? 'Article Generated ✓'
-                        : 'Generate Article'}
-                    </button>
-                  )}
-
-        {tweet.article_generated === 1 && onPublish && (
-          <>
-            <button
-              onClick={() => handlePublish('english')}
-              disabled={isPublishing.english || tweet.published_english === 1}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                tweet.published_english === 1
+          {/* Actions */}
+          <div className="flex flex-wrap gap-2 pt-4 border-t border-gray-100">
+            {onGenerateArticle && (
+              <button
+                onClick={handleGenerateArticle}
+                disabled={isGenerating || tweet.article_generated === 1}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tweet.article_generated === 1
                   ? 'bg-green-50 text-green-700 border border-green-200'
-                  : 'bg-purple-600 text-white hover:bg-purple-700'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-              title={
-                tweet.published_english === 1
-                  ? 'Article published to English WordPress'
-                  : isPublishing.english
-                  ? 'Publishing to English WordPress...'
-                  : 'Publish article to English WordPress'
-              }
-            >
-              <Globe className="h-4 w-4" />
-              {isPublishing.english
-                ? 'Publishing...'
-                : tweet.published_english === 1
-                ? 'Published (EN)'
-                : 'Publish (EN)'}
-            </button>
-            <button
-              onClick={() => handlePublish('french')}
-              disabled={isPublishing.french || tweet.published_french === 1}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                tweet.published_french === 1
-                  ? 'bg-green-50 text-green-700 border border-green-200'
-                  : 'bg-purple-600 text-white hover:bg-purple-700'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-              title={
-                tweet.published_french === 1
-                  ? 'Article published to French WordPress'
-                  : isPublishing.french
-                  ? 'Publishing to French WordPress...'
-                  : 'Publish article to French WordPress'
-              }
-            >
-              <Globe2 className="h-4 w-4" />
-              {isPublishing.french
-                ? 'Publishing...'
-                : tweet.published_french === 1
-                ? 'Published (FR)'
-                : 'Publish (FR)'}
-            </button>
-          </>
-        )}
-
-        {/* Blog Links */}
-        {(tweet.published_english_link || tweet.published_french_link) && (
-          <div className="flex flex-wrap gap-2 pt-2">
-            {tweet.published_english_link && (
-              <a
-                href={tweet.published_english_link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                  : isGenerating
+                    ? 'bg-yellow-500 text-white animate-pulse'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                title={
+                  tweet.article_generated === 1
+                    ? 'Article has been generated'
+                    : isGenerating
+                      ? 'Generating article...'
+                      : 'Generate article from this tweet'
+                }
               >
-                <Globe className="h-3 w-3" />
-                View Blog (EN)
-              </a>
+                <FileText className="h-4 w-4" />
+                {isGenerating
+                  ? 'Writing Article...'
+                  : tweet.article_generated === 1
+                    ? 'Article Generated ✓'
+                    : 'Generate Article'}
+              </button>
             )}
-            {tweet.published_french_link && (
-              <a
-                href={tweet.published_french_link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-purple-50 text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
-              >
-                <Globe2 className="h-3 w-3" />
-                View Blog (FR)
-              </a>
+
+            {tweet.article_generated === 1 && onPublish && (
+              <div className="flex items-center gap-2">
+                <select
+                  value={publishStatus}
+                  onChange={(e) => setPublishStatus(e.target.value as 'draft' | 'publish')}
+                  className="text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 pl-3 pr-8"
+                  title="Select publishing status"
+                >
+                  <option value="draft">Draft</option>
+                  <option value="publish">Live</option>
+                </select>
+                <button
+                  onClick={() => handlePublish('english')}
+                  disabled={isPublishing.english || tweet.published_english === 1}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tweet.published_english === 1
+                    ? 'bg-green-50 text-green-700 border border-green-200'
+                    : 'bg-purple-600 text-white hover:bg-purple-700'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  title={
+                    tweet.published_english === 1
+                      ? 'Article published to English WordPress'
+                      : isPublishing.english
+                        ? 'Publishing to English WordPress...'
+                        : 'Publish article to English WordPress'
+                  }
+                >
+                  <Globe className="h-4 w-4" />
+                  {isPublishing.english
+                    ? 'Publishing...'
+                    : tweet.published_english === 1
+                      ? 'Published (EN)'
+                      : 'Publish (EN)'}
+                </button>
+                <button
+                  onClick={() => handlePublish('french')}
+                  disabled={isPublishing.french || tweet.published_french === 1}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tweet.published_french === 1
+                    ? 'bg-green-50 text-green-700 border border-green-200'
+                    : 'bg-purple-600 text-white hover:bg-purple-700'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  title={
+                    tweet.published_french === 1
+                      ? 'Article published to French WordPress'
+                      : isPublishing.french
+                        ? 'Publishing to French WordPress...'
+                        : 'Publish article to French WordPress'
+                  }
+                >
+                  <Globe2 className="h-4 w-4" />
+                  {isPublishing.french
+                    ? 'Publishing...'
+                    : tweet.published_french === 1
+                      ? 'Published (FR)'
+                      : 'Publish (FR)'}
+                </button>
+              </div>
+            )}
+
+            {/* Blog Links */}
+            {(tweet.published_english_link || tweet.published_french_link) && (
+              <div className="flex flex-wrap gap-2 pt-2">
+                {tweet.published_english_link && (
+                  <a
+                    href={tweet.published_english_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                  >
+                    <Globe className="h-3 w-3" />
+                    View Blog (EN)
+                  </a>
+                )}
+                {tweet.published_french_link && (
+                  <a
+                    href={tweet.published_french_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-purple-50 text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+                  >
+                    <Globe2 className="h-3 w-3" />
+                    View Blog (FR)
+                  </a>
+                )}
+              </div>
             )}
           </div>
-        )}
-                </div>
         </div>
       </div>
 
       {/* Media Lightbox */}
-      {lightboxImage && (
-        <MediaLightbox
-          images={lightboxImage.images}
-          initialIndex={lightboxImage.index}
-          onClose={() => setLightboxImage(null)}
-        />
-      )}
-    </div>
+      {
+        lightboxImage && (
+          <MediaLightbox
+            images={lightboxImage.images}
+            initialIndex={lightboxImage.index}
+            onClose={() => setLightboxImage(null)}
+          />
+        )
+      }
+    </div >
   );
 }
 

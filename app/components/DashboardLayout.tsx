@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { 
-  LayoutDashboard, 
-  Settings, 
-  MessageSquare, 
-  FileText, 
+import {
+  LayoutDashboard,
+  Settings,
+  MessageSquare,
+  FileText,
   Globe,
   Menu,
   X
@@ -20,6 +20,7 @@ interface DashboardLayoutProps {
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { name: 'News Feed', href: '/news-feed', icon: Globe },
   { name: 'Tweets', href: '/tweets', icon: MessageSquare },
   { name: 'Articles', href: '/articles', icon: FileText },
   { name: 'Settings', href: '/settings', icon: Settings },
@@ -42,7 +43,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           }
         }
       }
-      
+
       // Esc to close modals/sidebar
       if (e.key === 'Escape') {
         setSidebarOpen(false);
@@ -65,9 +66,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out lg:translate-x-0 ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
       >
         <div className="flex flex-col h-full">
           {/* Logo */}
@@ -92,11 +92,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   key={item.name}
                   href={item.href}
                   onClick={() => setSidebarOpen(false)}
-                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
-                    isActive
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors ${isActive
                       ? 'bg-blue-50 text-blue-700 border border-blue-200'
                       : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
-                  }`}
+                    }`}
                 >
                   <item.icon className="mr-3 h-5 w-5" />
                   {item.name}

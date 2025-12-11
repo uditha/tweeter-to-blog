@@ -58,9 +58,9 @@ export default function ArticlesPage() {
 
   const articles = useMemo(() => {
     const allArticles = tweets?.filter((tweet: Tweet) => tweet.article_generated === 1) || [];
-    
+
     if (!searchQuery.trim()) return allArticles;
-    
+
     const query = searchQuery.toLowerCase();
     return allArticles.filter((tweet: Tweet) => {
       const text = tweet.text.toLowerCase();
@@ -134,11 +134,10 @@ export default function ArticlesPage() {
                   <button
                     key={tweet.id}
                     onClick={() => setSelectedTweet(tweet)}
-                    className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                      selectedTweet?.id === tweet.id
+                    className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedTweet?.id === tweet.id
                         ? 'border-blue-500 bg-blue-50'
                         : 'border-gray-200 hover:bg-gray-50'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-start space-x-2">
                       <FileText className="h-4 w-4 text-gray-500 mt-1 flex-shrink-0" />
@@ -177,8 +176,35 @@ export default function ArticlesPage() {
                   <h2 className="text-lg font-semibold text-gray-900 mb-4">Original Tweet</h2>
                   <TweetCard
                     tweet={selectedTweet}
-                    onIgnore={async () => {}}
-                    onGenerateArticle={async () => {}}
+                    onIgnore={async () => { }}
+                    onGenerateArticle={async () => { }}
+                    onPublish={async (id, language, status) => {
+                      try {
+                        const response = await fetch(`/api/tweets/${id}/publish`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ language, status }),
+                        });
+
+                        if (!response.ok) {
+                          const error = await response.json();
+                          throw new Error(error.message || 'Failed to publish article');
+                        }
+
+                        const data = await response.json();
+                        await refetch(); // Refresh data
+                        // Update selected tweet locally to reflect changes immediately
+                        setSelectedTweet(prev => prev ? {
+                          ...prev,
+                          [`published_${language}`]: 1,
+                          [`published_${language}_link`]: data.link
+                        } : null);
+
+                        return { link: data.link };
+                      } catch (error: any) {
+                        throw error;
+                      }
+                    }}
                   />
                 </div>
                 <ArticleViewer
