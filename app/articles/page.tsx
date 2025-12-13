@@ -73,11 +73,13 @@ export default function ArticlesPage() {
     refetchInterval: 10000, // Refetch every 10 seconds
   });
 
-  const tweets = response?.data || [];
-  const totalCount = response?.total || 0;
+  const tweets = Array.isArray(response?.data) ? response.data : (Array.isArray(response) ? response : []);
+  const totalCount = response?.total || (Array.isArray(response) ? response.length : 0);
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
 
   const articles = useMemo(() => {
+    // Ensure tweets is an array before filtering
+    if (!Array.isArray(tweets)) return [];
     // Filter to ensure only articles with article_generated = 1
     const allArticles = tweets.filter((tweet: Tweet) => tweet.article_generated === 1);
 

@@ -179,13 +179,13 @@ export default function TweetsPage() {
     staleTime: 0, // Always consider stale for real-time updates
   });
 
-  const tweets = response?.data || [];
-  const totalCount = response?.total || 0;
+  const tweets = Array.isArray(response?.data) ? response.data : (Array.isArray(response) ? response : []);
+  const totalCount = response?.total || (Array.isArray(response) ? response.length : 0);
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
 
   // Filter and sort tweets client-side
   const filteredAndSortedTweets = useMemo(() => {
-    if (!tweets) return [];
+    if (!Array.isArray(tweets) || tweets.length === 0) return [];
 
     let filtered = [...tweets];
 
@@ -450,7 +450,7 @@ export default function TweetsPage() {
   };
 
   const handleSelectAll = () => {
-    if (!tweets) return;
+    if (!Array.isArray(tweets) || tweets.length === 0) return;
     const allIds = new Set<number>(tweets.map((tweet: Tweet) => tweet.id));
     setSelectedTweets(allIds);
   };
@@ -535,11 +535,11 @@ export default function TweetsPage() {
               const isActive = activeTab === tab.id;
               // Count should reflect filtered results
               const count = tab.id === activeTab ? filteredAndSortedTweets.length : 
-                tweets?.filter((tweet: Tweet) => {
+                (Array.isArray(tweets) ? tweets.filter((tweet: Tweet) => {
                   if (tab.id === 'with-articles') return tweet.article_generated === 1;
                   if (tab.id === 'ignored') return tweet.ignored === 1;
                   return true;
-                }).length || 0;
+                }).length : 0);
 
               return (
                 <button
