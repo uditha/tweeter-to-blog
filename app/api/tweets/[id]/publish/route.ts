@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { settings, tweets } from '@/lib/db';
 import { Buffer } from 'buffer';
+import { marked } from 'marked';
 
 async function uploadImageToWordPress(
   imageUrl: string,
@@ -179,7 +180,10 @@ export async function POST(
       featuredMediaId = await uploadImageToWordPress(imageUrl, wpUrl, wpUsername, wpPassword);
     }
 
-    const fullContent = `${articleData.article || articleData.content || ''}
+    // Convert markdown to HTML
+    const articleHtml = marked(articleData.article || articleData.content || '');
+    
+    const fullContent = `${articleHtml}
 <hr>
 <p><em>Source: <a href="https://twitter.com/${tweet.username}/status/${tweet.tweet_id}" target="_blank">Original Tweet</a></em></p>`;
 

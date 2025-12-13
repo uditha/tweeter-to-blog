@@ -13,6 +13,7 @@
     "@tanstack/react-query": "^5.56.0",
     "@types/pg": "^8.15.6",
     "lucide-react": "^0.460.0",
+    "marked": "^17.0.1",
     "next": "^14.2.0",
     "openai": "^4.28.0",
     "pg": "^8.16.3",
@@ -23,6 +24,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/marked": "^5.0.2",
     "@types/node": "^20.14.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

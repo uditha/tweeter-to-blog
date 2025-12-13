@@ -1,4 +1,5 @@
 import { settings } from '@/lib/db';
+import { marked } from 'marked';
 
 interface PublishOptions {
   title: string;
@@ -96,6 +97,9 @@ export async function publishToWordPress(options: PublishOptions): Promise<Publi
       return { success: false, error: 'Title and content are required' };
     }
 
+    // Convert markdown to HTML
+    const htmlContent = marked(content);
+
     // Get WordPress configuration based on language
     let wpUrl, wpUsername, wpPassword;
     
@@ -139,7 +143,7 @@ export async function publishToWordPress(options: PublishOptions): Promise<Publi
     // Build post data
     const postData: any = {
       title,
-      content,
+      content: htmlContent, // Use converted HTML instead of raw content
       status: status, // 'draft' or 'publish'
     };
 
