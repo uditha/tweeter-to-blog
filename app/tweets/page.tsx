@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import TweetCard from '@/app/components/TweetCard';
-import { Filter, RefreshCw, User, FileText, MessageSquare, EyeOff, Sparkles, Loader2, CheckSquare, Square } from 'lucide-react';
+import { Filter, RefreshCw, User, FileText, MessageSquare, EyeOff, Sparkles, Loader2, CheckSquare, Square, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useToast } from '@/app/components/ToastProvider';
 import { SkeletonTweetCard } from '@/app/components/SkeletonLoader';
 import EmptyState from '@/app/components/EmptyState';
@@ -78,20 +78,31 @@ const TABS: TabConfig[] = [
   },
 ];
 
+const ITEMS_PER_PAGE = 50;
+
 async function fetchTweets(filters: {
   ignored?: boolean;
   articleGenerated?: boolean;
   accountId?: number;
-}) {
+}, page: number = 1) {
   const params = new URLSearchParams();
   if (filters.ignored !== undefined) params.append('ignored', filters.ignored.toString());
   if (filters.articleGenerated !== undefined) params.append('articleGenerated', filters.articleGenerated.toString());
   if (filters.accountId !== undefined && filters.accountId !== null) params.append('accountId', filters.accountId.toString());
-  params.append('limit', '100');
+  
+  const limit = ITEMS_PER_PAGE;
+  const offset = (page - 1) * limit;
+  params.append('limit', limit.toString());
+  params.append('offset', offset.toString());
 
   const response = await fetch(`/api/tweets?${params.toString()}`);
   if (!response.ok) throw new Error('Failed to fetch tweets');
-  return response.json();
+  const result = await response.json();
+  // Handle both old format (array) and new format (object with data/total)
+  if (Array.isArray(result)) {
+    return { data: result, total: result.length, limit, offset };
+  }
+  return result;
 }
 
 async function fetchAccounts(): Promise<Account[]> {
@@ -108,6 +119,7 @@ export default function TweetsPage() {
   const [accountFilter, setAccountFilter] = useState<number | undefined>(undefined);
   const [isBulkGenerating, setIsBulkGenerating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [filterState, setFilterState] = useState<FilterState>({
     dateRange: 'all',
     sortBy: 'date',
@@ -155,12 +167,21 @@ export default function TweetsPage() {
     return baseFilters;
   }, [activeTab, accountFilter]);
 
-  const { data: tweets, isLoading: tweetsLoading, refetch } = useQuery({
-    queryKey: ['tweets', filters, activeTab],
-    queryFn: () => fetchTweets(filters),
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters, activeTab, accountFilter]);
+
+  const { data: response, isLoading: tweetsLoading, refetch } = useQuery({
+    queryKey: ['tweets', filters, activeTab, currentPage],
+    queryFn: () => fetchTweets(filters, currentPage),
     refetchInterval: 5000, // Refetch every 5 seconds
     staleTime: 0, // Always consider stale for real-time updates
   });
+
+  const tweets = response?.data || [];
+  const totalCount = response?.total || 0;
+  const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
 
   // Filter and sort tweets client-side
   const filteredAndSortedTweets = useMemo(() => {
@@ -452,11 +473,25 @@ export default function TweetsPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+        <div className="flex-1">
           <h1 className="text-3xl font-bold text-gray-900">Tweets</h1>
           <p className="mt-2 text-sm text-gray-600">
             {activeTabConfig?.description || 'View and manage tweets from monitored accounts'}
           </p>
+          {/* Pagination Info */}
+          {!isLoading && totalCount > 0 && (
+            <div className="mt-2 text-sm text-gray-500">
+              Showing <span className="font-medium text-gray-700">{((currentPage - 1) * ITEMS_PER_PAGE) + 1}</span> to{' '}
+              <span className="font-medium text-gray-700">{Math.min(currentPage * ITEMS_PER_PAGE, totalCount)}</span> of{' '}
+              <span className="font-medium text-gray-700">{totalCount.toLocaleString()}</span> tweets
+              {totalPages > 1 && (
+                <span className="ml-2">
+                  (Page <span className="font-medium text-gray-700">{currentPage}</span> of{' '}
+                  <span className="font-medium text-gray-700">{totalPages}</span>)
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {selectedTweets.size > 0 && activeTab !== 'with-articles' && (
@@ -582,7 +617,7 @@ export default function TweetsPage() {
                     {selectedTweets.size > 0 
                       ? `${selectedTweets.size} of ${selectableTweets.length} selected`
                       : `${selectableTweets.length} tweet${selectableTweets.length !== 1 ? 's' : ''} available for article generation`}
-                    {searchQuery && ` (filtered from ${tweets?.length || 0} total)`}
+                    {searchQuery && ` (filtered from ${filteredAndSortedTweets?.length || 0} on this page)`}
                   </span>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -617,19 +652,79 @@ export default function TweetsPage() {
           ))}
         </div>
       ) : filteredAndSortedTweets && filteredAndSortedTweets.length > 0 ? (
-        <div className="space-y-4">
-          {filteredAndSortedTweets.map((tweet: Tweet) => (
-            <TweetCard
-              key={tweet.id}
-              tweet={tweet}
-              selected={selectedTweets.has(tweet.id)}
-              onSelect={handleSelect}
-              onIgnore={handleIgnore}
-              onGenerateArticle={handleGenerateArticle}
-              onPublish={handlePublish}
-            />
-          ))}
-        </div>
+        <>
+          <div className="space-y-4">
+            {filteredAndSortedTweets.map((tweet: Tweet) => (
+              <TweetCard
+                key={tweet.id}
+                tweet={tweet}
+                selected={selectedTweets.has(tweet.id)}
+                onSelect={handleSelect}
+                onIgnore={handleIgnore}
+                onGenerateArticle={handleGenerateArticle}
+                onPublish={handlePublish}
+              />
+            ))}
+          </div>
+          
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="mt-6 pt-6 border-t border-gray-200 flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, totalCount)} of {totalCount.toLocaleString()} tweets
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1 || isLoading}
+                  className="px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+                  title="Previous page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  <span>Previous</span>
+                </button>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum: number;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i;
+                    } else {
+                      pageNum = currentPage - 2 + i;
+                    }
+                    
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => setCurrentPage(pageNum)}
+                        disabled={isLoading}
+                        className={`px-3 py-2 rounded-lg border transition-colors ${
+                          currentPage === pageNum
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages || isLoading}
+                  className="px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+                  title="Next page"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <EmptyState
           icon={MessageSquare}

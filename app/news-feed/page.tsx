@@ -43,7 +43,9 @@ interface Tweet {
 async function fetchFeed() {
     const response = await fetch('/api/tweets?limit=50'); // Fetch recent 50 tweets
     if (!response.ok) throw new Error('Failed to fetch feed');
-    return response.json();
+    const result = await response.json();
+    // Handle both old format (array) and new format (object with data/total)
+    return Array.isArray(result) ? result : result.data || [];
 }
 
 function FeedItem({ tweet, onPublish, onGenerateArticle, onIgnore }: {

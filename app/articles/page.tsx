@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import ArticleViewer from '@/app/components/ArticleViewer';
 import TweetCard from '@/app/components/TweetCard';
-import { FileText, RefreshCw } from 'lucide-react';
+import { FileText, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { SkeletonTweetCard } from '@/app/components/SkeletonLoader';
 import EmptyState from '@/app/components/EmptyState';
@@ -40,24 +40,46 @@ interface Tweet {
   published_french_link: string | null;
 }
 
-async function fetchArticles() {
-  const response = await fetch('/api/tweets?articleGenerated=true&limit=100');
+const ITEMS_PER_PAGE = 50;
+
+async function fetchArticles(page: number = 1) {
+  const limit = ITEMS_PER_PAGE;
+  const offset = (page - 1) * limit;
+  
+  const params = new URLSearchParams();
+  params.append('articleGenerated', 'true');
+  params.append('limit', limit.toString());
+  params.append('offset', offset.toString());
+  
+  const response = await fetch(`/api/tweets?${params.toString()}`);
   if (!response.ok) throw new Error('Failed to fetch articles');
-  return response.json();
+  const result = await response.json();
+  
+  // Handle both old format (array) and new format (object with data/total)
+  if (Array.isArray(result)) {
+    return { data: result, total: result.length, limit, offset };
+  }
+  return result;
 }
 
 export default function ArticlesPage() {
   const [selectedTweet, setSelectedTweet] = useState<Tweet | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
 
-  const { data: tweets, isLoading, refetch } = useQuery({
-    queryKey: ['articles'],
-    queryFn: fetchArticles,
+  const { data: response, isLoading, refetch } = useQuery({
+    queryKey: ['articles', currentPage],
+    queryFn: () => fetchArticles(currentPage),
     refetchInterval: 10000, // Refetch every 10 seconds
   });
 
+  const tweets = response?.data || [];
+  const totalCount = response?.total || 0;
+  const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
+
   const articles = useMemo(() => {
-    const allArticles = tweets?.filter((tweet: Tweet) => tweet.article_generated === 1) || [];
+    // Filter to ensure only articles with article_generated = 1
+    const allArticles = tweets.filter((tweet: Tweet) => tweet.article_generated === 1);
 
     if (!searchQuery.trim()) return allArticles;
 
@@ -69,6 +91,14 @@ export default function ArticlesPage() {
       return text.includes(query) || username.includes(query) || accountName.includes(query);
     });
   }, [tweets, searchQuery]);
+
+  // Reset to page 1 when search query changes
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (value !== searchQuery) {
+      setCurrentPage(1);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -83,7 +113,7 @@ export default function ArticlesPage() {
         <div className="flex gap-2">
           <SearchBar
             value={searchQuery}
-            onChange={setSearchQuery}
+            onChange={handleSearchChange}
             placeholder="Search articles..."
             className="flex-1 sm:flex-initial sm:w-64"
           />
@@ -127,7 +157,7 @@ export default function ArticlesPage() {
           <div className="lg:col-span-1 space-y-4">
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Generated Articles ({articles.length})
+                Generated Articles ({totalCount.toLocaleString()})
               </h2>
               <div className="space-y-2 max-h-[600px] overflow-y-auto">
                 {articles.map((tweet: Tweet) => (
@@ -165,6 +195,33 @@ export default function ArticlesPage() {
                   </button>
                 ))}
               </div>
+              
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
+                  <div className="text-sm text-gray-600">
+                    Page {currentPage} of {totalPages} ({totalCount.toLocaleString()} total)
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1 || isLoading}
+                      className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title="Previous page"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                      disabled={currentPage === totalPages || isLoading}
+                      className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title="Next page"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

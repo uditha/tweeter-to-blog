@@ -19,8 +19,17 @@ export async function GET(request: NextRequest) {
     if (publishedFrench !== null) filters.publishedFrench = publishedFrench === 'true';
     if (accountId !== null) filters.accountId = parseInt(accountId);
 
-    const allTweets = await tweets.getFiltered(filters, limit, offset);
-    return NextResponse.json(allTweets);
+    const [allTweets, totalCount] = await Promise.all([
+      tweets.getFiltered(filters, limit, offset),
+      tweets.getFilteredCount(filters)
+    ]);
+
+    return NextResponse.json({
+      data: allTweets,
+      total: totalCount,
+      limit,
+      offset
+    });
   } catch (error: any) {
     console.error('Error fetching tweets:', error);
     return NextResponse.json(

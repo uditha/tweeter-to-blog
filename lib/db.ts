@@ -446,6 +446,51 @@ export const tweets = {
     const result = await queryWithRetry(() => pool.query(query, params));
     return result.rows as any[];
   },
+
+  getFilteredCount: async (filters: {
+    ignored?: boolean;
+    articleGenerated?: boolean;
+    publishedEnglish?: boolean;
+    publishedFrench?: boolean;
+    accountId?: number;
+  }): Promise<number> => {
+    let query = `
+      SELECT COUNT(*) as count
+      FROM tweets t
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    if (filters.ignored !== undefined) {
+      query += ` AND t.ignored = $${paramIndex}`;
+      params.push(filters.ignored ? 1 : 0);
+      paramIndex++;
+    }
+    if (filters.articleGenerated !== undefined) {
+      query += ` AND t.article_generated = $${paramIndex}`;
+      params.push(filters.articleGenerated ? 1 : 0);
+      paramIndex++;
+    }
+    if (filters.publishedEnglish !== undefined) {
+      query += ` AND t.published_english = $${paramIndex}`;
+      params.push(filters.publishedEnglish ? 1 : 0);
+      paramIndex++;
+    }
+    if (filters.publishedFrench !== undefined) {
+      query += ` AND t.published_french = $${paramIndex}`;
+      params.push(filters.publishedFrench ? 1 : 0);
+      paramIndex++;
+    }
+    if (filters.accountId !== undefined) {
+      query += ` AND t.account_id = $${paramIndex}`;
+      params.push(filters.accountId);
+      paramIndex++;
+    }
+
+    const result = await queryWithRetry(() => pool.query(query, params));
+    return parseInt(result.rows[0].count, 10);
+  },
 };
 
 // Settings operations
